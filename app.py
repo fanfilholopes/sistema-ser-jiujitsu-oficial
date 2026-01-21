@@ -588,7 +588,7 @@ def painel_adm_filial():
     st.sidebar.caption(f"{CARGOS.get(perfil, perfil).upper()}")
     rodape_sidebar()
 
-    tab_dash, tab_chamada, tab_graduacao, tab_turmas, tab_alunos = st.tabs(["📊 Painel", "✅ Chamada", "🎓 Graduações", "📅 Turmas", "👥 Equipe"])
+    tab_dash, tab_chamada, tab_graduacao, tab_turmas, tab_alunos = st.tabs(["📊 Painel", "✅ Chamada", "🎓 Graduações", "📅 Turmas", "👥 Alunos"])
 
     # 1. DASHBOARD PREMIUM
     with tab_dash:
@@ -766,13 +766,121 @@ def painel_adm_filial():
                     executar_query("INSERT INTO usuarios (nome_completo, email, senha, data_nascimento, id_filial, perfil, status_conta, faixa, graus) VALUES (%s, %s, '123', %s, %s, 'aluno', 'Ativo', 'Branca', 0)", (nm, em, nas, id_filial))
                     st.success("Cadastrado!"); time.sleep(1); st.rerun()
 
+# --- 🧑‍🎓 PAINEL ALUNO (Módulo Adicional) ---
+def painel_aluno():
+    user = st.session_state.usuario
+    # Menu Lateral Simples
+    try: st.sidebar.image("logoser.jpg", width=150)
+    except: st.sidebar.markdown("## 🥋 SER Jiu-Jitsu")
+    st.sidebar.markdown(f"**Aluno:** {user['nome_completo']}")
+    if st.sidebar.button("Sair", key="sair_aluno"):
+        st.session_state.logado = False
+        st.rerun()
+
+    # Aviso Global
+    aviso = executar_query("SELECT mensagem FROM avisos WHERE ativo=TRUE ORDER BY id DESC LIMIT 1", fetch=True)
+    if aviso:
+        st.info(f"📢 AVISO DA EQUIPE: {aviso[0]['mensagem']}")
+
+    # Corpo Principal
+    st.title(f"Bem-vindo, {user['nome_completo'].split()[0]}")
+    
+    # Cartão de Status
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Minha Faixa", f"{user['faixa']}")
+    c2.metric("Graus", f"{user['graus']}º")
+    
+    # Cálculo de Frequência
+    total_treinos = executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s", (user['id'],), fetch=True)[0][0]
+    treinos_mes = executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND EXTRACT(MONTH FROM data_aula) = EXTRACT(MONTH FROM CURRENT_DATE)", (user['id'],), fetch=True)[0][0]
+    c3.metric("Treinos (Total)", total_treinos, delta=f"+{treinos_mes} este mês")
+
+    st.divider()
+    
+    # Abas
+    t1, t2 = st.tabs(["📅 Meu Histórico", "🥋 Minha Evolução"])
+    
+    with t1:
+        st.subheader("Últimos Treinos")
+        hist = executar_query("SELECT to_char(data_aula, 'DD/MM/YYYY') as data, 'Presença Confirmada' as status FROM checkins WHERE id_aluno=%s ORDER BY data_aula DESC LIMIT 10", (user['id'],), fetch=True)
+        if hist:
+            st.dataframe(pd.DataFrame(hist, columns=['Data do Treino', 'Status']), use_container_width=True, hide_index=True)
+        else:
+            st.write("Nenhum treino registrado ainda.")
+
+    with t2:
+        st.subheader("Jornada para a Próxima Faixa")
+        # Recalcula lógica simples de progresso
+        presencas_marco = executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND data_aula >= %s", (user['id'], user['data_ultimo_grau'] or date.today()), fetch=True)[0][0]
+        # Regra simplificada para visualização (ex: meta 50 aulas para adulto)
+        meta_visual = 50 
+        progresso = min(presencas_marco / meta_visual, 1.0)
+        st.progress(progresso)
+        st.caption(f"Você tem {presencas_marco} treinos acumulados neste grau.")
+
+# --- 📋 PAINEL MONITOR (Módulo Adicional) ---
+def painel_monitor():
+    user = st.session_state.usuario
+    # Menu Lateral
+    try: st.sidebar.image("logoser.jpg", width=150)
+    except: pass
+    st.sidebar.title("Área do Monitor")
+    st.sidebar.write(f"Olá, {user['nome_completo']}")
+    if st.sidebar.button("Sair", key="sair_mon"):
+        st.session_state.logado = False
+        st.rerun()
+
+    st.title("📋 Controle de Presença")
+    
+    # Seleção de Turma
+    turmas = executar_query("SELECT id, nome FROM turmas WHERE id_filial=%s", (user['id_filial'],), fetch=True)
+    opts = {t['nome']: t['id'] for t in turmas} if turmas else {}
+    sel_turma = st.selectbox("Selecione a Turma", list(opts.keys())) if opts else None
+    
+    if sel_turma:
+        id_t = opts[sel_turma]
+        # Lista Alunos
+        alunos = executar_query("SELECT id, nome_completo FROM usuarios WHERE id_turma=%s AND status_conta='Ativo' ORDER BY nome_completo", (id_t,), fetch=True)
+        
+        # Já vieram hoje?
+        ja_veio = [x[0] for x in executar_query("SELECT id_aluno FROM checkins WHERE id_turma=%s AND data_aula=CURRENT_DATE", (id_t,), fetch=True)]
+        
+        with st.form("chamada_monitor"):
+            st.write(f"**Chamada de Hoje ({date.today().strftime('%d/%m')})**")
+            checks = []
+            if alunos:
+                for a in alunos:
+                    is_checked = a['id'] in ja_veio
+                    if st.checkbox(a['nome_completo'], value=is_checked, key=f"mon_{a['id']}"):
+                        checks.append(a['id'])
+                
+                if st.form_submit_button("💾 Salvar Chamada"):
+                    # Limpa e reinsere (seguro)
+                    executar_query("DELETE FROM checkins WHERE id_turma=%s AND data_aula=CURRENT_DATE", (id_t,))
+                    for uid in checks:
+                        executar_query("INSERT INTO checkins (id_aluno, id_turma, id_filial, data_aula) VALUES (%s, %s, %s, CURRENT_DATE)", (uid, id_t, user['id_filial']))
+                    st.success("Chamada atualizada com sucesso!")
+                    time.sleep(1)
+                    st.rerun()
+            else:
+                st.warning("Nenhum aluno nesta turma.")
+
 # ==================================================
-# 5. ROUTER
+# 5. ROUTER (Atualize APENAS este bloco final)
 # ==================================================
 if not st.session_state.logado:
     tela_login()
 else:
+    # Verifica perfil e direciona
     p = st.session_state.usuario['perfil']
-    if p == 'lider': painel_lider()
-    elif p == 'monitor': painel_monitor()
-    else: painel_adm_filial()
+    
+    if p == 'lider':
+        painel_lider()
+    elif p == 'monitor':
+        painel_monitor()  # <--- Agora funciona pq a função existe acima
+    elif p == 'aluno':
+        painel_aluno()    # <--- Agora funciona pq a função existe acima
+    elif p == 'adm_filial' or p == 'professor':
+        painel_adm_filial()
+    else:
+        st.error(f"Perfil desconhecido: {p}")
