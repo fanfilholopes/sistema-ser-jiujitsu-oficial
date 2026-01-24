@@ -49,7 +49,6 @@ def painel_lider():
             total_filiais = db.executar_query("SELECT COUNT(*) FROM filiais", fetch=True)[0][0]
             pendencias = db.executar_query("SELECT COUNT(*) FROM solicitacoes_graduacao WHERE status='Aguardando Homologacao'", fetch=True)[0][0]
             
-            # Aniversariantes
             q_niver = """
                 SELECT u.nome_completo, f.nome as filial, u.telefone 
                 FROM usuarios u 
@@ -108,19 +107,17 @@ def painel_lider():
                     fig_bar.update_traces(textposition='outside')
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-        # 2. ALUNOS GLOBAL (AGORA COM FORMULÁRIO COMPLETO)
+        # 2. ALUNOS GLOBAL (FORMULÁRIO ATUALIZADO ✅)
         with tab_alunos_global:
             if 'lider_edit_aluno_id' not in st.session_state: st.session_state.lider_edit_aluno_id = None
             
-            # --- CADASTRO COMPLETO NA REDE ---
+            # --- CADASTRO COMPLETO ---
             with st.expander("➕ Matricular Novo Aluno na Rede"):
                 st.markdown("##### Dados Cadastrais")
                 
-                # Busca filiais para o select
                 lista_filiais = db.executar_query("SELECT id, nome FROM filiais ORDER BY nome", fetch=True)
                 opts_filial_reg = {f['nome']: f['id'] for f in lista_filiais} if lista_filiais else {}
 
-                # Cálculo de Idade Dinâmico
                 c_data, c_aviso = st.columns([1, 2])
                 nasc_reg = c_data.date_input("Data de Nascimento", value=date(2015, 1, 1), min_value=date(1920, 1, 1), max_value=date.today())
                 idade = (date.today() - nasc_reg).days // 365
@@ -130,23 +127,22 @@ def painel_lider():
                 else: c_aviso.success(f"🥋 ADULTO ({idade} anos)")
 
                 with st.form("form_novo_aluno_rede"):
-                    # Linha 1: Nome e Filial
                     c1, c2 = st.columns([2, 1])
                     novo_nome_reg = c1.text_input("Nome Completo")
                     sel_filial_reg = c2.selectbox("Filial de Matrícula", list(opts_filial_reg.keys())) if opts_filial_reg else None
                     
-                    # Linha 2: Faixa, Grau e Início
-                    c3, c4, c5 = st.columns(3)
+                    # LINHA ATUALIZADA COM O CAMPO DE ÚLTIMO GRAU
+                    c3, c4, c5, c_ug = st.columns(4)
                     faixa_reg = c3.selectbox("Faixa Inicial", utils.ORDEM_FAIXAS)
                     grau_reg = c4.selectbox("Grau", [0,1,2,3,4])
                     dt_inicio_reg = c5.date_input("Data de Início", date.today())
+                    # CAMPO NOVO AQUI:
+                    dt_ult_grau_reg = c_ug.date_input("Data Último Grau", value=None)
                     
-                    # Linha 3: Contatos
                     c6, c7 = st.columns(2)
                     novo_zap_reg = c6.text_input("WhatsApp")
                     novo_email_reg = c7.text_input("E-mail (Será o Login)")
 
-                    # Responsável (Condicional)
                     nm_resp, tel_resp = None, None
                     if is_kid:
                         st.divider()
@@ -157,27 +153,23 @@ def painel_lider():
 
                     st.write("")
                     if st.form_submit_button("💾 Realizar Matrícula", type="primary", use_container_width=True):
-                        # Validação
                         if not novo_nome_reg or not novo_email_reg or not sel_filial_reg:
                             st.error("Preencha os campos obrigatórios: Nome, E-mail e Filial.")
                         elif is_kid and not nm_resp:
                             st.error("Para menores de 16 anos, o nome do responsável é obrigatório.")
                         else:
                             id_filial_sel = opts_filial_reg[sel_filial_reg]
+                            # Define data do ultimo grau: Se vazio, usa a data de inicio
+                            data_grad_final = dt_ult_grau_reg if dt_ult_grau_reg else dt_inicio_reg
                             
-                            # Tenta inserir
                             res = db.executar_query(
                                 """INSERT INTO usuarios (nome_completo, email, senha, telefone, data_nascimento, faixa, graus, id_filial, perfil, status_conta, data_inicio, data_ultimo_grau, nome_responsavel, telefone_responsavel) 
                                 VALUES (%s, %s, '123', %s, %s, %s, %s, %s, 'aluno', 'Ativo', %s, %s, %s, %s)""",
-                                (novo_nome_reg, novo_email_reg, novo_zap_reg, nasc_reg, faixa_reg, grau_reg, id_filial_sel, dt_inicio_reg, dt_inicio_reg, nm_resp, tel_resp)
+                                (novo_nome_reg, novo_email_reg, novo_zap_reg, nasc_reg, faixa_reg, grau_reg, id_filial_sel, dt_inicio_reg, data_grad_final, nm_resp, tel_resp)
                             )
                             
-                            if res == "ERRO_DUPLICADO": 
-                                st.error("Este e-mail já está cadastrado no sistema!")
-                            elif res: 
-                                st.success(f"Aluno {novo_nome_reg} matriculado com sucesso na filial {sel_filial_reg}!")
-                                time.sleep(1.5)
-                                st.rerun()
+                            if res == "ERRO_DUPLICADO": st.error("Este e-mail já está cadastrado no sistema!")
+                            elif res: st.success(f"Aluno {novo_nome_reg} matriculado com sucesso na filial {sel_filial_reg}!"); time.sleep(1.5); st.rerun()
 
             st.markdown("---")
 
@@ -238,23 +230,19 @@ def painel_lider():
                 if alunos_global:
                     for a in alunos_global:
                         c_info, c_btns = st.columns([4, 1.2])
-                        
                         c_info.markdown(f"**{a['nome_completo']}** <span style='color:grey; font-size:0.9em'>| {a['faixa']} | 🏢 {a['nome_filial']}</span>", unsafe_allow_html=True)
-                        
                         with c_btns:
                             b_ed, b_del = st.columns([1, 1], gap="small")
                             if b_ed.button("✏️", key=f"ged_{a['id']}"):
-                                st.session_state.lider_edit_aluno_id = a['id']
-                                st.rerun()
+                                st.session_state.lider_edit_aluno_id = a['id']; st.rerun()
                             if b_del.button("🗑️", key=f"gdel_{a['id']}"):
                                 db.executar_query("UPDATE usuarios SET status_conta='Inativo' WHERE id=%s", (a['id'],))
                                 st.toast("Inativado!"); time.sleep(0.5); st.rerun()
-                        
                         st.markdown('<hr style="margin: 0px 0; border: none; border-top: 1px solid #2b2b2b;">', unsafe_allow_html=True)
                 else:
                     st.info("Nenhum aluno encontrado.")
 
-        # 3. HOMOLOGAÇÃO (MANTIDO IGUAL)
+        # 3. HOMOLOGAÇÃO (MANTIDO)
         with tab_homolog:
             st.markdown("#### Assinatura de Faixas (Rede)")
             pendentes = db.executar_query("""
@@ -279,7 +267,7 @@ def painel_lider():
             else:
                 st.success("Tudo em dia! Nenhuma graduação pendente de assinatura.")
 
-        # 4. FILIAIS (MANTIDO IGUAL)
+        # 4. FILIAIS (MANTIDO)
         with tab_filiais:
             if 'form_filial' not in st.session_state: st.session_state.form_filial = {"rua": "", "bairro": "", "cidade": "", "uf": ""}
             if 'editando_filial_id' not in st.session_state: st.session_state.editando_filial_id = None
@@ -344,14 +332,57 @@ def painel_lider():
                     with col_btn:
                         if st.button("✏️", key=f"ed_{f['id']}"): st.session_state.editando_filial_id = f['id']; st.rerun()
 
-        # 5. AVISOS (MANTIDO IGUAL)
+        # 5. AVISOS (RESTAURADO ✅)
         with tab_avisos:
-            st.markdown("### 📢 Avisos")
-            MODELOS = {"--- Selecione ---": "", "🎉 Niver": "Parabéns!", "🛑 Aviso": "Atenção!"}
+            st.markdown("### 📢 Central de Comunicação da Rede")
+            MODELOS = {
+                "--- Selecione um modelo ---": "",
+                "🎉 Aniversariantes": "Parabéns aos guerreiros que completam mais um ano de vida este mês! Que venham muitos anos de tatame e evolução. Oss! 🥋🎂",
+                "💰 Mensalidade": "Lembrete: O vencimento da sua mensalidade está próximo. Mantenha seu cadastro em dia para continuar evoluindo. Oss!",
+                "📅 Feriado": "Aviso: Não haverá treino nesta data devido ao feriado. Retornamos nossas atividades normais no dia X. Bom descanso!",
+                "🏆 Graduação": "Atenção Equipe! Nossa cerimônia de graduação está marcada. Preparem seus kimonos e convidem seus familiares!",
+                "🛑 Aviso Importante": "Comunicado urgente: [Escreva aqui seu aviso]"
+            }
+            if 'msg_atual' not in st.session_state: st.session_state.msg_atual = ""
+            def atualizar_texto():
+                escolha = st.session_state.sel_modelo
+                if escolha != "--- Selecione um modelo ---":
+                    st.session_state.msg_atual = MODELOS[escolha]
+
             with st.container(border=True):
-                t = st.text_input("Título"); m = st.text_area("Mensagem")
-                if st.button("Enviar"): 
-                    if t and m: db.executar_query("INSERT INTO avisos (titulo, mensagem, publico_alvo, data_postagem, ativo) VALUES (%s, %s, 'Todos', CURRENT_DATE, TRUE)", (t, m)); st.success("Enviado!"); st.rerun()
+                c_mod, c_pub = st.columns([1, 1])
+                c_mod.selectbox("📂 Carregar Modelo Rápido", list(MODELOS.keys()), key="sel_modelo", on_change=atualizar_texto)
+                publico = c_pub.selectbox("🎯 Público Alvo", ["Todos", "Alunos", "Professores", "Admins Filiais"])
+                st.markdown("---")
+                titulo = st.text_input("Título do Aviso (Ex: Feriado de Carnaval)")
+                mensagem = st.text_area("Mensagem", value=st.session_state.msg_atual, height=150)
+                c_btn, c_info = st.columns([1, 3])
+                if c_btn.button("🚀 Enviar Comunicado", type="primary", use_container_width=True):
+                    if titulo and mensagem:
+                        db.executar_query("INSERT INTO avisos (titulo, mensagem, publico_alvo, data_postagem, ativo) VALUES (%s, %s, %s, CURRENT_DATE, TRUE)", (titulo, mensagem, publico))
+                        st.success("Aviso publicado com sucesso!"); time.sleep(1); st.rerun()
+                    else: st.error("Preencha o título e a mensagem.")
+                c_info.caption(f"Este aviso será visível para: **{publico}**")
+
+            st.divider()
+            st.markdown("#### 📜 Histórico de Envios")
+            historico = db.executar_query("SELECT id, data_postagem, titulo, publico_alvo, ativo FROM avisos ORDER BY id DESC", fetch=True)
+            if historico:
+                col_h1, col_h2, col_h3, col_h4, col_h5 = st.columns([1, 2, 1.5, 1, 1])
+                col_h1.markdown("**Data**"); col_h2.markdown("**Título**"); col_h3.markdown("**Público**"); col_h4.markdown("**Status**"); col_h5.markdown("**Ação**")
+                for av in historico:
+                    c1, c2, c3, c4, c5 = st.columns([1, 2, 1.5, 1, 1])
+                    c1.write(av['data_postagem'].strftime('%d/%m'))
+                    c2.write(av['titulo'])
+                    cor_badge = "blue" if av['publico_alvo'] == 'Todos' else "orange"
+                    c3.markdown(f":{cor_badge}[{av['publico_alvo']}]")
+                    status_icon = "🟢 Ativo" if av['ativo'] else "🔴 Inativo"
+                    c4.write(status_icon)
+                    if c5.button("🗑️", key=f"del_av_{av['id']}", help="Apagar Aviso"):
+                        db.executar_query("DELETE FROM avisos WHERE id=%s", (av['id'],))
+                        st.toast("Aviso removido!"); time.sleep(0.5); st.rerun()
+                    st.divider()
+            else: st.info("Nenhum comunicado enviado ainda.")
 
     # =======================================================
     # CONTEXTO 2: VISÃO DE AULAS (SEDE)
