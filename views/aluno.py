@@ -16,9 +16,20 @@ def painel_aluno():
         st.session_state.logado = False
         st.rerun()
 
-    # Aviso
-    aviso = db.executar_query("SELECT mensagem FROM avisos WHERE ativo=TRUE ORDER BY id DESC LIMIT 1", fetch=True)
-    if aviso: st.markdown(f"""<div class="aviso-box">📢 {aviso[0]['mensagem']}</div>""", unsafe_allow_html=True)
+    # --- CORREÇÃO: MURAL DE AVISOS DO ALUNO ---
+    # Mostra todos os ativos para "Todos" ou "Alunos"
+    avisos = db.executar_query("""
+        SELECT titulo, mensagem, data_postagem FROM avisos 
+        WHERE ativo=TRUE 
+        AND publico_alvo IN ('Todos', 'Alunos') 
+        ORDER BY id DESC
+    """, fetch=True)
+    
+    if avisos: 
+        st.markdown("### 📢 Avisos")
+        for av in avisos:
+            st.info(f"**{av['titulo']}**\n\n{av['mensagem']}")
+        st.divider()
 
     # Carteirinha e Stats
     c_card, c_stats = st.columns([1, 2])
