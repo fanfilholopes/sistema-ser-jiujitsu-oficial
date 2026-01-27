@@ -5,23 +5,18 @@ import pandas as pd
 from datetime import date
 import time
 
-def painel_aluno():
+# ALTERAÇÃO AQUI: Adicionado parâmetro opcional
+def painel_aluno(renderizar_sidebar=True):
     user = st.session_state.usuario
     
     # --- CORES DAS FAIXAS (Local) ---
     CORES_FAIXAS = {
-        'Branca': '#F0F0F0',
-        'Cinza': '#A0A0A0',
-        'Amarela': '#FFD700',
-        'Laranja': '#FF8C00',
-        'Verde': '#228B22',
-        'Azul': '#0000FF',
-        'Roxa': '#800080',
-        'Marrom': '#8B4513',
-        'Preta': '#000000'
+        'Branca': '#F0F0F0', 'Cinza': '#A0A0A0', 'Amarela': '#FFD700',
+        'Laranja': '#FF8C00', 'Verde': '#228B22', 'Azul': '#0000FF',
+        'Roxa': '#800080', 'Marrom': '#8B4513', 'Preta': '#000000'
     }
 
-    # --- BUSCAR DADOS EXTRAS ---
+    # --- BUSCAR DADOS EXTRAS (Fica fora do if pois usamos no card principal) ---
     filial_data = db.executar_query("SELECT nome FROM filiais WHERE id=%s", (user['id_filial'],), fetch=True)
     nome_filial = filial_data[0]['nome'] if filial_data else "Matriz / Sede"
 
@@ -34,25 +29,34 @@ def painel_aluno():
             nome_turma = t['nome']
             detalhes_turma = f"{t['dias']} às {t['horario']}"
 
-    # --- SIDEBAR ---
-    try: st.sidebar.image("logoser.jpg", width=150)
-    except: pass
-    st.sidebar.markdown("## Área do Aluno")
-    st.sidebar.caption(f"Olá, {user['nome_completo']}")
-    
-    st.sidebar.markdown(f"📍 **{nome_filial}**")
-    st.sidebar.markdown(f"🥋 **{user['faixa']}** ({user['graus']}º Grau)")
-    
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Sair", key="sair_aluno"):
-        st.session_state.logado = False
-        st.rerun()
+    # --- SIDEBAR (Só renderiza se for Aluno puro) ---
+    if renderizar_sidebar:
+        try: st.sidebar.image("logoser.jpg", width=150)
+        except: pass
+        st.sidebar.markdown("## Área do Aluno")
+        st.sidebar.caption(f"Olá, {user['nome_completo']}")
+        
+        st.sidebar.markdown(f"📍 **{nome_filial}**")
+        st.sidebar.markdown(f"🥋 **{user['faixa']}** ({user['graus']}º Grau)")
+        
+        st.sidebar.markdown("---")
+        if st.sidebar.button("Sair", key="sair_aluno"):
+            st.session_state.logado = False
+            st.rerun()
 
     # =======================================================
-    # 1. CHECK-IN E GRADUAÇÃO
+    # CONTEÚDO PRINCIPAL (Exibido para Aluno e Monitor)
     # =======================================================
-    checkin_hoje = db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND data_aula=CURRENT_DATE", (user['id'],), fetch=True)[0][0]
     
+    # --- LÓGICA DO STATUS DO CHECK-IN ---
+    dados_checkin = db.executar_query("SELECT validado FROM checkins WHERE id_aluno=%s AND data_aula=CURRENT_DATE", (user['id'],), fetch=True)
+    fez_checkin = False
+    esta_validado = False
+    if dados_checkin:
+        fez_checkin = True
+        esta_validado = dados_checkin[0][0]
+
+    # Verifica solicitações de graduação
     solicitacao = db.executar_query("""
         SELECT nova_faixa, status FROM solicitacoes_graduacao 
         WHERE id_aluno=%s AND status != 'Concluido' 
@@ -63,19 +67,20 @@ def painel_aluno():
 
     with c_check:
         st.markdown("##### 📍 Presença Hoje")
-        if checkin_hoje > 0:
-            st.success("✅ Confirmada!")
+        if fez_checkin:
+            if esta_validado: st.success("✅ Confirmada!")
+            else:
+                st.warning("⏳ Aguardando Prof.")
+                st.caption("O professor precisa aceitar seu check-in.")
         else:
             if st.button("📲 Fazer Check-in", type="primary", use_container_width=True):
                 if user['id_turma']:
                     db.executar_query("""
-                        INSERT INTO checkins (id_aluno, id_turma, id_filial, data_aula) 
-                        VALUES (%s, %s, %s, CURRENT_DATE)
+                        INSERT INTO checkins (id_aluno, id_turma, id_filial, data_aula, validado) 
+                        VALUES (%s, %s, %s, CURRENT_DATE, FALSE)
                     """, (user['id'], user['id_turma'], user['id_filial']))
-                    st.toast("Check-in realizado com sucesso!")
-                    time.sleep(1.5); st.rerun()
-                else:
-                    st.error("Você não está em uma turma. Fale com seu professor.")
+                    st.toast("Solicitação enviada ao professor!"); time.sleep(1.5); st.rerun()
+                else: st.error("Você não está em uma turma. Fale com seu professor.")
 
     with c_aviso_grad:
         if solicitacao:
@@ -90,9 +95,7 @@ def painel_aluno():
 
     st.divider()
 
-    # =======================================================
-    # 2. MURAL DE AVISOS
-    # =======================================================
+    # --- MURAL DE AVISOS ---
     avisos = db.executar_query("""
         SELECT titulo, mensagem, data_postagem FROM avisos 
         WHERE ativo=TRUE AND publico_alvo IN ('Todos', 'Alunos') 
@@ -107,16 +110,13 @@ def painel_aluno():
                 st.write(av['mensagem'])
         st.divider()
 
-    # =======================================================
-    # 3. ESTATÍSTICAS E CARTEIRINHA
-    # =======================================================
+    # --- ESTATÍSTICAS E CARTEIRINHA ---
     c_card, c_stats = st.columns([1.2, 1.8])
     
     with c_card:
         cor_faixa = CORES_FAIXAS.get(user['faixa'], '#ccc')
         cor_texto_tag = 'black' if user['faixa'] in ['Branca', 'Amarela'] else 'white'
 
-        # HTML SEM INDENTAÇÃO PARA NÃO DAR ERRO NO MARKDOWN
         html_card = f"""
 <div style="background-color: #1E1E1E; padding: 20px; border-radius: 12px; border-left: 6px solid {cor_faixa}; box-shadow: 0 4px 10px rgba(0,0,0,0.4);">
 <small style="color:#888; text-transform:uppercase; letter-spacing:1px;">Aluno Oficial</small>
@@ -141,8 +141,8 @@ def painel_aluno():
         st.markdown(html_card, unsafe_allow_html=True)
 
     with c_stats:
-        total = db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s", (user['id'],), fetch=True)[0][0]
-        presencas_marco = db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND data_aula >= %s", (user['id'], user['data_ultimo_grau'] or date.today()), fetch=True)[0][0]
+        total = db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND validado=TRUE", (user['id'],), fetch=True)[0][0]
+        presencas_marco = db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND validado=TRUE AND data_aula >= %s", (user['id'], user['data_ultimo_grau'] or date.today()), fetch=True)[0][0]
         _, msg_meta, progresso, _ = utils.calcular_status_graduacao(user, presencas_marco)
         
         st.subheader("Minha Jornada 🥋")
@@ -151,17 +151,13 @@ def painel_aluno():
         
         k1, k2 = st.columns(2)
         k1.metric("Treinos (Total)", total)
-        k2.metric("Treinos (Este Mês)", db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND EXTRACT(MONTH FROM data_aula) = EXTRACT(MONTH FROM CURRENT_DATE)", (user['id'],), fetch=True)[0][0])
+        k2.metric("Treinos (Este Mês)", db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND validado=TRUE AND EXTRACT(MONTH FROM data_aula) = EXTRACT(MONTH FROM CURRENT_DATE)", (user['id'],), fetch=True)[0][0])
 
-    # =======================================================
-    # 4. HISTÓRICO RECENTE
-    # =======================================================
     st.divider()
     with st.expander("📅 Ver Histórico de Presença"):
-        hist = db.executar_query("SELECT data_aula, 'Presente' as status FROM checkins WHERE id_aluno=%s ORDER BY data_aula DESC LIMIT 10", (user['id'],), fetch=True)
+        hist = db.executar_query("SELECT data_aula, 'Presente' as status FROM checkins WHERE id_aluno=%s AND validado=TRUE ORDER BY data_aula DESC LIMIT 10", (user['id'],), fetch=True)
         if hist: 
             df_hist = pd.DataFrame(hist, columns=['Data do Treino', 'Status'])
             df_hist['Data do Treino'] = pd.to_datetime(df_hist['Data do Treino']).dt.strftime('%d/%m/%Y')
             st.dataframe(df_hist, use_container_width=True, hide_index=True)
-        else:
-            st.info("Nenhum treino registrado ainda.")
+        else: st.info("Nenhum treino validado registrado ainda.")

@@ -5,6 +5,7 @@ import views.lider as lider
 import views.admin as admin
 import views.monitor as monitor
 import views.aluno as aluno
+import views.professor as professor
 
 # --- CONFIGURAÇÃO ---
 if 'sidebar_state' not in st.session_state: st.session_state.sidebar_state = 'expanded'
@@ -30,7 +31,22 @@ if not st.session_state.logado:
     login.mostrar_login()
 else:
     p = st.session_state.usuario['perfil']
-    if p == 'lider': lider.painel_lider()
-    elif p == 'monitor': monitor.painel_monitor()
-    elif p == 'aluno': aluno.painel_aluno()
-    else: admin.painel_adm_filial()
+    
+    if p == 'lider': 
+        lider.painel_lider()
+        
+    elif p == 'adm_filial': 
+        admin.painel_adm_filial()
+        
+    elif p == 'professor': 
+        professor.painel_professor()
+        
+    elif p == 'monitor': 
+        monitor.painel_monitor()
+        
+    elif p == 'aluno': 
+        aluno.painel_aluno()
+        
+    else:
+        # Fallback de segurança (manda para admin se não reconhecer)
+        admin.painel_adm_filial()
