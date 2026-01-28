@@ -46,7 +46,6 @@ def painel_adm_filial(renderizar_sidebar=True):
         
         st.write("")
 
-        # AJUSTE: Conta Alunos + Monitores
         qtd_alunos = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE id_filial=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor')", (id_filial,), fetch=True)[0][0]
         treinos_hoje = db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_filial=%s AND data_aula=CURRENT_DATE AND validado=TRUE", (id_filial,), fetch=True)[0][0]
         
@@ -110,9 +109,7 @@ def painel_adm_filial(renderizar_sidebar=True):
         if pendencias:
             st.error(f"🔔 Existem {len(pendencias)} check-ins aguardando aprovação!")
             
-            # GRID DE 3 COLUNAS
             cols = st.columns(3)
-            
             for i, p in enumerate(pendencias):
                 with cols[i % 3]:
                     with st.container(border=True):
@@ -144,7 +141,6 @@ def painel_adm_filial(renderizar_sidebar=True):
         with col_lista:
             if sel_turma:
                 id_t = d_t[sel_turma]
-                # AJUSTE: Lista Alunos e Monitores na chamada manual
                 alunos = db.executar_query("SELECT id, nome_completo, faixa FROM usuarios WHERE id_turma=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor') ORDER BY nome_completo", (id_t,), fetch=True)
                 checkins_feitos = [x[0] for x in db.executar_query("SELECT id_aluno FROM checkins WHERE id_turma=%s AND data_aula=%s AND validado=TRUE", (id_t, data_aula), fetch=True)]
                 
@@ -194,50 +190,76 @@ def painel_adm_filial(renderizar_sidebar=True):
     # 3. GRADUAÇÃO
     # =======================================================
     with tab_grad:
+        # --- ETAPA 1: PENDENTE (Autorização Financeira/Adm) ---
         if eh_admin:
             pend = db.executar_query("SELECT s.id, u.nome_completo, s.nova_faixa FROM solicitacoes_graduacao s JOIN usuarios u ON s.id_aluno=u.id WHERE s.id_filial=%s AND s.status='Pendente'", (id_filial,), fetch=True)
             if pend:
-                st.write("**Financeiro:**")
+                st.warning("🟠 **Aguardando Autorização (Financeiro/Adm):**")
                 for p in pend:
                     c1, c2 = st.columns([3,1])
-                    c1.write(f"{p['nome_completo']} -> {p['nova_faixa']}")
-                    if c2.button("Autorizar", key=f"au_{p['id']}"):
+                    c1.write(f"**{p['nome_completo']}** ➝ {p['nova_faixa']}")
+                    if c2.button("Autorizar Exame", key=f"au_{p['id']}"):
                         db.executar_query("UPDATE solicitacoes_graduacao SET status='Aguardando Exame' WHERE id=%s", (p['id'],))
                         st.rerun()
+                st.divider()
         
+        # --- ETAPA 2: EXAME (Avaliação Técnica) ---
         exams = db.executar_query("SELECT s.id, u.nome_completo, s.nova_faixa FROM solicitacoes_graduacao s JOIN usuarios u ON s.id_aluno=u.id WHERE s.id_filial=%s AND s.status='Aguardando Exame'", (id_filial,), fetch=True)
         if exams:
-            st.write("**Exame Prático:**")
+            st.info("🥋 **Aguardando Exame Prático:**")
             for e in exams:
                 c1, c2 = st.columns([3,1])
-                c1.write(f"{e['nome_completo']} -> {e['nova_faixa']}")
-                if c2.button("Aprovado", key=f"ex_{e['id']}"):
+                c1.write(f"**{e['nome_completo']}** ➝ {e['nova_faixa']}")
+                if c2.button("Aprovado ✅", key=f"ex_{e['id']}"):
                     db.executar_query("UPDATE solicitacoes_graduacao SET status='Aguardando Homologacao' WHERE id=%s", (e['id'],))
                     st.rerun()
+            st.divider()
 
-        st.divider()
-        st.markdown("#### 📡 Radar")
-        # AJUSTE: Inclui monitores no Radar
+        st.markdown("#### 📡 Radar de Graduação")
+        
+        # Busca IDs bloqueados (quem já está no funil)
+        em_processo = db.executar_query("""
+            SELECT id_aluno FROM solicitacoes_graduacao 
+            WHERE status NOT IN ('Concluido', 'Recusado', 'Reprovado')
+        """, fetch=True)
+        ids_em_processo = [int(x['id_aluno']) for x in em_processo] if em_processo else []
+
         alunos = db.executar_query("SELECT id, nome_completo, faixa, graus, data_nascimento, data_ultimo_grau, data_inicio FROM usuarios WHERE id_filial=%s AND perfil IN ('aluno', 'monitor') AND status_conta='Ativo'", (id_filial,), fetch=True)
+        
         if alunos:
+            cont_radar = 0
             for a in alunos:
+                if int(a['id']) in ids_em_processo:
+                    continue
+
                 marco = a['data_ultimo_grau'] or a['data_inicio'] or date.today()
                 pres = db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND data_aula >= %s AND validado=TRUE", (a['id'], marco), fetch=True)[0][0]
-                _, msg, prog, troca = utils.calcular_status_graduacao(a, pres)
-                with st.expander(f"{'🔥' if prog >=1 else '⏳'} {a['nome_completo']} - {msg}"):
+                
+                apto, msg, prog, troca = utils.calcular_status_graduacao(a, pres)
+                
+                with st.expander(f"{'🔥' if apto else '⏳'} {a['nome_completo']} - {msg}"):
                     st.progress(prog)
                     c1, c2 = st.columns(2)
+                    
                     if c1.button("+1 Grau", key=f"g_{a['id']}"):
                         db.executar_query("UPDATE usuarios SET graus = graus + 1, data_ultimo_grau = CURRENT_DATE WHERE id=%s", (a['id'],))
-                        st.toast("Grau +1"); st.rerun()
+                        st.toast("Grau adicionado!"); time.sleep(0.5); st.rerun()
+                    
                     if troca:
-                        nf = utils.get_proxima_faixa(a['faixa'])
+                        # --- CORREÇÃO AQUI: Passamos a IDADE para get_proxima_faixa ---
+                        idade_atual = utils.calcular_idade_ano(a['data_nascimento'])
+                        nf = utils.get_proxima_faixa(a['faixa'], idade_atual)
+                        
                         if c2.button(f"Indicar {nf}", key=f"ind_{a['id']}"):
                             db.executar_query("INSERT INTO solicitacoes_graduacao (id_aluno, id_filial, faixa_atual, nova_faixa, status) VALUES (%s, %s, %s, %s, 'Pendente')", (a['id'], id_filial, a['faixa'], nf))
-                            st.success("Indicado!"); st.rerun()
+                            st.success("Indicado! Aguardando autorização."); time.sleep(1); st.rerun()
+                cont_radar += 1
+            
+            if cont_radar == 0:
+                st.caption("Todos os alunos elegíveis já foram indicados ou não há alunos ativos fora do processo.")
 
     # =======================================================
-    # 4. TURMAS (COMPLETO COM MONITOR)
+    # 4. TURMAS
     # =======================================================
     with tab_turmas:
         sub_tab_config, sub_tab_enturmar = st.tabs(["⚙️ Criar/Editar Turmas", "👥 Gerenciar Alunos na Turma"])
@@ -269,7 +291,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                         
                         c_prof, c_mon = st.columns(2)
                         
-                        # Select Professor
                         profs = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_filial=%s AND perfil IN ('professor', 'lider', 'adm_filial')", (id_filial,), fetch=True)
                         opts_prof = {p['nome_completo']: p['id'] for p in profs} if profs else {}
                         idx_prof = 0
@@ -278,7 +299,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                             if nome_prof: idx_prof = list(opts_prof.keys()).index(nome_prof)
                         sel_prof = c_prof.selectbox("Professor Responsável", list(opts_prof.keys()), index=idx_prof) if opts_prof else None
 
-                        # Select Monitor
                         mons = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_filial=%s AND perfil='monitor'", (id_filial,), fetch=True)
                         opts_mon = {m['nome_completo']: m['id'] for m in mons}
                         opts_mon["--- Sem Monitor ---"] = None
@@ -320,7 +340,6 @@ def painel_adm_filial(renderizar_sidebar=True):
             """, (id_filial,), fetch=True)
             if ts:
                 for t in ts:
-                    # AJUSTE: Conta alunos e monitores como participantes da turma
                     qtd_t = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE id_turma=%s AND status_conta='Ativo'", (t['id'],), fetch=True)[0][0]
                     prof_txt = f" | 🥋 Prof. {t['nome_prof']}" if t['nome_prof'] else " | ⚠️ Sem Prof."
                     mon_txt = f" | 🧢 Mon. {t['nome_mon']}" if t['nome_mon'] else ""
@@ -345,7 +364,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                 col_in, col_out = st.columns(2)
                 with col_in:
                     st.success("✅ Alunos Nesta Turma")
-                    # AJUSTE: Inclui Monitores na lista da turma
                     alunos_in = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_turma=%s AND status_conta='Ativo' ORDER BY nome_completo", (id_t_alvo,), fetch=True)
                     if alunos_in:
                         for a in alunos_in:
@@ -357,7 +375,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                     else: st.caption("Vazia.")
                 with col_out:
                     st.warning("⚠️ Alunos Disponíveis")
-                    # AJUSTE: Permite selecionar Monitores para entrar na turma
                     alunos_out = db.executar_query("SELECT id, nome_completo, id_turma FROM usuarios WHERE (id_turma IS NULL OR id_turma != %s) AND id_filial=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor') ORDER BY nome_completo", (id_t_alvo, id_filial), fetch=True)
                     filtro = st.text_input("🔎 Buscar aluno", placeholder="Nome...")
                     count_show = 0
@@ -372,7 +389,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                             if count_show >= 10 and not filtro: st.caption("..."); break
 
     # =======================================================
-    # 5. ALUNOS (LISTA E CADASTRO)
+    # 5. ALUNOS
     # =======================================================
     with tab_alunos:
         if 'aluno_edit_id' not in st.session_state: st.session_state.aluno_edit_id = None
@@ -412,7 +429,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                 c_h1, c_h2, c_h3 = st.columns([2, 1, 1.5])
                 c_h1.markdown("**Nome**"); c_h2.markdown("**Faixa**"); c_h3.markdown("**Ações**")
                 st.markdown('<hr style="margin: 5px 0; border: none; border-top: 1px solid #333;">', unsafe_allow_html=True)
-                # AJUSTE: Lista inclui Monitores para edição
                 membros = db.executar_query("SELECT id, nome_completo, faixa, perfil FROM usuarios WHERE id_filial=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor') ORDER BY nome_completo", (id_filial,), fetch=True)
                 if membros:
                     for m in membros:
