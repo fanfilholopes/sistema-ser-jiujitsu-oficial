@@ -47,7 +47,7 @@ def painel_adm_filial(renderizar_sidebar=True):
         
         st.write("")
 
-        # --- MÉTRICAS ---
+        # --- MÉTRICAS (CACHEÁVEIS SE PRECISAR) ---
         dados_status = db.executar_query("""
             SELECT status_conta, COUNT(*) 
             FROM usuarios 
@@ -100,13 +100,10 @@ def painel_adm_filial(renderizar_sidebar=True):
                             st.toast("Recusado."); time.sleep(0.5); st.rerun()
             st.divider()
 
-        # --- SEÇÃO 2: RADAR DE EVASÃO (CORRIGIDO: SÓ QUEM JÁ TREINOU) ---
+        # --- SEÇÃO 2: RADAR DE EVASÃO ---
         st.markdown("#### 👻 Radar de Evasão (> 2 Semanas)")
         
-        # AQUI ESTÁ A CORREÇÃO:
-        # Removemos a verificação da 'data_inicio'.
-        # O Radar agora só pega quem tem MAX(data_aula) antiga.
-        # Quem nunca treinou (MAX é NULL) não aparece aqui.
+        # Otimização: Só busca quem tem histórico de checkins
         sql_evasao = """
             SELECT u.id, u.nome_completo, u.telefone, u.faixa, MAX(c.data_aula) as ultimo_treino
             FROM usuarios u
@@ -119,7 +116,7 @@ def painel_adm_filial(renderizar_sidebar=True):
         sumidos = db.executar_query(sql_evasao, (id_filial,), fetch=True)
         
         if sumidos:
-            st.error(f"⚠️ Atenção! **{len(sumidos)} alunos** (que já treinavam) sumiram há mais de 2 semanas.")
+            st.error(f"⚠️ Atenção! **{len(sumidos)} alunos** veteranos sumiram há mais de 2 semanas.")
             with st.expander("Ver lista de risco", expanded=True):
                 for s in sumidos:
                     dias_ausente = (date.today() - s['ultimo_treino']).days
@@ -152,13 +149,11 @@ def painel_adm_filial(renderizar_sidebar=True):
             col_pizza, col_barras = st.columns([1, 1.5])
             cores_map = {'Branca': '#f0f0f0', 'Cinza': '#a0a0a0', 'Amarela': '#ffe135', 'Laranja': '#ff8c00', 'Verde': '#228b22', 'Azul': '#0000ff', 'Roxa': '#800080', 'Marrom': '#8b4513', 'Preta': '#000000'}
             df_graf = pd.DataFrame(d_faixa, columns=['Faixa', 'Qtd'])
-            
             with col_pizza:
                 st.markdown("##### Distribuição")
                 fig_pie = px.pie(df_graf, values='Qtd', names='Faixa', hole=0.4, color='Faixa', color_discrete_map=cores_map)
                 fig_pie.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
                 st.plotly_chart(fig_pie, use_container_width=True)
-                
             with col_barras:
                 st.markdown("##### Por Faixa")
                 fig_bar = px.bar(df_graf.sort_values('Qtd', ascending=False), x='Faixa', y='Qtd', text='Qtd', color='Faixa', color_discrete_map=cores_map)
@@ -167,7 +162,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                 st.plotly_chart(fig_bar, use_container_width=True)
 
     # =======================================================
-    # 2. CHAMADA (MANTIDO)
+    # 2. CHAMADA
     # =======================================================
     with tab_chamada:
         pendencias = db.executar_query("""
@@ -252,7 +247,7 @@ def painel_adm_filial(renderizar_sidebar=True):
             st.markdown(html_tags, unsafe_allow_html=True)
 
     # =======================================================
-    # 3. GRADUAÇÃO (MANTIDO)
+    # 3. GRADUAÇÃO (OTIMIZAÇÃO DE PERFORMANCE: SQL DIRETO)
     # =======================================================
     with tab_grad:
         if eh_admin:
@@ -279,16 +274,36 @@ def painel_adm_filial(renderizar_sidebar=True):
             st.divider()
 
         st.markdown("#### 📡 Radar de Graduação")
+        
+        # 1. Pega IDs bloqueados (quem já está no funil)
         em_processo = db.executar_query("SELECT id_aluno FROM solicitacoes_graduacao WHERE status NOT IN ('Concluido', 'Recusado', 'Reprovado')", fetch=True)
         ids_em_processo = [int(x['id_aluno']) for x in em_processo] if em_processo else []
-        alunos = db.executar_query("SELECT id, nome_completo, faixa, graus, data_nascimento, data_ultimo_grau, data_inicio FROM usuarios WHERE id_filial=%s AND perfil IN ('aluno', 'monitor') AND status_conta='Ativo'", (id_filial,), fetch=True)
+
+        # 2. QUERY OTIMIZADA: Busca alunos E JÁ CONTA AS PRESENÇAS VÁLIDAS DE UMA VEZ
+        # Isso elimina o loop lento que fazia uma consulta por aluno.
+        sql_radar_otimizado = """
+            SELECT 
+                u.id, u.nome_completo, u.faixa, u.graus, u.data_nascimento, u.data_ultimo_grau, u.data_inicio,
+                (
+                    SELECT COUNT(*) 
+                    FROM checkins c 
+                    WHERE c.id_aluno = u.id 
+                    AND c.validado = TRUE 
+                    AND c.data_aula >= COALESCE(u.data_ultimo_grau, u.data_inicio, CURRENT_DATE)
+                ) as presencas_validas
+            FROM usuarios u 
+            WHERE u.id_filial=%s AND u.perfil IN ('aluno', 'monitor') AND u.status_conta='Ativo'
+        """
+        alunos = db.executar_query(sql_radar_otimizado, (id_filial,), fetch=True)
         
         if alunos:
             cont_radar = 0
             for a in alunos:
                 if int(a['id']) in ids_em_processo: continue
-                marco = a['data_ultimo_grau'] or a['data_inicio'] or date.today()
-                pres = db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND data_aula >= %s AND validado=TRUE", (a['id'], marco), fetch=True)[0][0]
+                
+                # A contagem já vem pronta do banco, não precisa consultar de novo!
+                pres = a['presencas_validas'] 
+                
                 apto, msg, prog, troca = utils.calcular_status_graduacao(a, pres)
                 with st.expander(f"{'🔥' if apto else '⏳'} {a['nome_completo']} - {msg}"):
                     st.progress(prog)
@@ -306,7 +321,7 @@ def painel_adm_filial(renderizar_sidebar=True):
             if cont_radar == 0: st.caption("Todos em dia.")
 
     # =======================================================
-    # 4. TURMAS (MANTIDO)
+    # 4. TURMAS
     # =======================================================
     with tab_turmas:
         sub_tab_config, sub_tab_enturmar = st.tabs(["⚙️ Criar/Editar Turmas", "👥 Gerenciar Alunos na Turma"])
@@ -399,7 +414,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                                 st.toast("Adicionado!"); time.sleep(0.5); st.rerun()
 
     # =======================================================
-    # 5. ALUNOS (MANTIDO)
+    # 5. ALUNOS
     # =======================================================
     with tab_alunos:
         if 'aluno_edit_id' not in st.session_state: st.session_state.aluno_edit_id = None
@@ -500,7 +515,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                         elif is_kid and not nm_resp: st.error("Responsável obrigatório.")
                         else:
                             ug = dt_ult if dt_ult else dt_inicio
-                            # --- AQUI ESTÁ A CHAVE: SALVA COMO 'Pendente' ---
                             res = db.executar_query("""INSERT INTO usuarios (nome_completo, email, senha, telefone, data_nascimento, faixa, graus, id_filial, id_turma, perfil, status_conta, data_inicio, data_ultimo_grau, nome_responsavel, telefone_responsavel) VALUES (%s, %s, '123', %s, %s, %s, %s, %s, %s, 'aluno', 'Pendente', %s, %s, %s, %s)""", (nome, email, zap, nasc, faixa, graus, id_filial, opts_turma[turma], dt_inicio, ug, nm_resp, tel_resp))
                             if res == "ERRO_DUPLICADO": st.error("Email já existe!")
                             elif res: st.success("Solicitação enviada! Aprove o aluno no Painel Principal."); time.sleep(1.5); st.rerun()
