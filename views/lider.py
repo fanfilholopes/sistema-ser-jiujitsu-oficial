@@ -9,9 +9,10 @@ import views.admin as admin_view
 
 def painel_lider():
     user = st.session_state.usuario
+    # O Líder também tem uma filial "sede" vinculada ao cadastro dele
     id_filial_sede = user['id_filial']
 
-    # --- SIDEBAR ---
+    # --- SIDEBAR COM DUPLA VISÃO ---
     try: st.sidebar.image("logoser.jpg", width=150)
     except: pass
     
@@ -32,19 +33,20 @@ def painel_lider():
     if c2.button("⏪"): st.session_state.sidebar_state = 'collapsed'; st.rerun()
 
     # =======================================================
-    # CONTEXTO 1: GESTÃO DA REDE (CEO)
+    # CONTEXTO 1: GESTÃO DA REDE (CEO / ESTRATÉGICO)
     # =======================================================
     if modo_visao == "🌍 Rede & Estratégia":
         st.title("🌍 Painel Estratégico da Rede")
         
         tab_dash, tab_alunos_global, tab_homolog, tab_filiais, tab_avisos = st.tabs([
-            "📊 Dashboard", "👥 Alunos Global", "🎓 Homologação", "🏢 Filiais", "📢 Avisos"
+            "📊 Dashboard", "👥 Gestão de Alunos", "🎓 Homologação", "🏢 Gestão de Filiais", "📢 Avisos"
         ])
 
         # 1. DASHBOARD GLOBAL
         with tab_dash:
             # Consultas de Totais
             total_alunos = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Ativo' AND perfil='aluno'", fetch=True)[0][0]
+            total_inativos = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Inativo' AND perfil='aluno'", fetch=True)[0][0]
             total_profs = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Ativo' AND perfil IN ('professor', 'lider', 'monitor')", fetch=True)[0][0]
             total_filiais = db.executar_query("SELECT COUNT(*) FROM filiais", fetch=True)[0][0]
             pendencias = db.executar_query("SELECT COUNT(*) FROM solicitacoes_graduacao WHERE status='Aguardando Homologacao'", fetch=True)[0][0]
@@ -61,16 +63,17 @@ def painel_lider():
             qtd_niver = len(aniversariantes) if aniversariantes else 0
 
             # --- KPIs ---
-            k1, k2, k3, k4, k5 = st.columns(5)
-            k1.metric("Alunos", total_alunos)
-            k2.metric("🥋 Professores", total_profs)
-            k3.metric("🏢 Filiais", total_filiais)
+            k1, k2, k3, k4, k5, k6 = st.columns(6)
+            k1.metric("Alunos Ativos", total_alunos)
+            k2.metric("🚫 Inativos", total_inativos)
+            k3.metric("🥋 Professores", total_profs)
+            k4.metric("🏢 Filiais", total_filiais)
             
             label_pend = "✅ Em dia" if pendencias == 0 else "⚠️ Assinar"
-            k4.metric("Homologação", pendencias, delta=label_pend, delta_color="inverse" if pendencias > 0 else "normal")
+            k5.metric("Homologação", pendencias, delta=label_pend, delta_color="inverse" if pendencias > 0 else "normal")
             
             label_niver = "🎂 Niver" if qtd_niver == 0 else "🎉 Festa!"
-            k5.metric(label_niver, qtd_niver)
+            k6.metric(label_niver, qtd_niver)
 
             st.divider()
 
@@ -107,7 +110,7 @@ def painel_lider():
                     fig_bar.update_traces(textposition='outside')
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-        # 2. ALUNOS GLOBAL (FORMULÁRIO ATUALIZADO ✅)
+        # 2. ALUNOS GLOBAL
         with tab_alunos_global:
             if 'lider_edit_aluno_id' not in st.session_state: st.session_state.lider_edit_aluno_id = None
             
@@ -131,12 +134,10 @@ def painel_lider():
                     novo_nome_reg = c1.text_input("Nome Completo")
                     sel_filial_reg = c2.selectbox("Filial de Matrícula", list(opts_filial_reg.keys())) if opts_filial_reg else None
                     
-                    # LINHA ATUALIZADA COM O CAMPO DE ÚLTIMO GRAU
                     c3, c4, c5, c_ug = st.columns(4)
                     faixa_reg = c3.selectbox("Faixa Inicial", utils.ORDEM_FAIXAS)
                     grau_reg = c4.selectbox("Grau", [0,1,2,3,4])
                     dt_inicio_reg = c5.date_input("Data de Início", date.today())
-                    # CAMPO NOVO AQUI:
                     dt_ult_grau_reg = c_ug.date_input("Data Último Grau", value=None)
                     
                     c6, c7 = st.columns(2)
@@ -159,7 +160,6 @@ def painel_lider():
                             st.error("Para menores de 16 anos, o nome do responsável é obrigatório.")
                         else:
                             id_filial_sel = opts_filial_reg[sel_filial_reg]
-                            # Define data do ultimo grau: Se vazio, usa a data de inicio
                             data_grad_final = dt_ult_grau_reg if dt_ult_grau_reg else dt_inicio_reg
                             
                             res = db.executar_query(
@@ -193,7 +193,7 @@ def painel_lider():
                         c_b1, c_b2 = st.columns(2)
                         if c_b1.form_submit_button("💾 Salvar", use_container_width=True):
                             db.executar_query("UPDATE usuarios SET nome_completo=%s, id_filial=%s, faixa=%s, graus=%s WHERE id=%s", 
-                                            (novo_nome, opts_filial_reg[nova_filial], nova_faixa, novo_grau, st.session_state.lider_edit_aluno_id))
+                                              (novo_nome, opts_filial_reg[nova_filial], nova_faixa, novo_grau, st.session_state.lider_edit_aluno_id))
                             st.success("Salvo!"); st.session_state.lider_edit_aluno_id = None; time.sleep(0.5); st.rerun()
                         
                         if c_b2.form_submit_button("Cancelar", use_container_width=True):
@@ -242,11 +242,13 @@ def painel_lider():
                 else:
                     st.info("Nenhum aluno encontrado.")
 
-        # 3. HOMOLOGAÇÃO (MANTIDO)
+        # 3. HOMOLOGAÇÃO
         with tab_homolog:
             st.markdown("#### Assinatura de Faixas (Rede)")
+            st.caption("Ao assinar, o aluno recebe a nova faixa e o tempo de carência é resetado.")
+            
             pendentes = db.executar_query("""
-                SELECT s.id, u.nome_completo, f.nome as filial, s.faixa_atual, s.nova_faixa 
+                SELECT s.id, u.nome_completo, f.nome as filial, s.faixa_atual, s.nova_faixa, s.id_aluno 
                 FROM solicitacoes_graduacao s 
                 JOIN usuarios u ON s.id_aluno=u.id 
                 JOIN filiais f ON s.id_filial=f.id 
@@ -261,78 +263,139 @@ def painel_lider():
                         c1.caption(f"📍 {p['filial']}")
                         c2.markdown(f"{p['faixa_atual']} ➝ **{p['nova_faixa']}**")
                         if c3.button("✅ Assinar", key=f"hm_{p['id']}", use_container_width=True):
-                            db.executar_query("UPDATE usuarios SET faixa=%s, graus=0, data_graduacao=CURRENT_DATE WHERE id=(SELECT id_aluno FROM solicitacoes_graduacao WHERE id=%s)", (p['nova_faixa'], p['id']))
-                            db.executar_query("UPDATE solicitacoes_graduacao SET status='Concluido' WHERE id=%s", (p['id'],))
+                            db.executar_query("""
+                                UPDATE usuarios 
+                                SET faixa=%s, graus=0, data_ultimo_grau=CURRENT_DATE 
+                                WHERE id=%s
+                            """, (p['nova_faixa'], p['id_aluno']))
+                            
+                            db.executar_query("UPDATE solicitacoes_graduacao SET status='Concluido', data_conclusao=CURRENT_DATE WHERE id=%s", (p['id'],))
                             st.toast("Homologado!"); time.sleep(1); st.rerun()
             else:
                 st.success("Tudo em dia! Nenhuma graduação pendente de assinatura.")
 
-        # 4. FILIAIS (MANTIDO)
+        # 4. GESTÃO DE FILIAIS + ADMINS
         with tab_filiais:
             if 'form_filial' not in st.session_state: st.session_state.form_filial = {"rua": "", "bairro": "", "cidade": "", "uf": ""}
             if 'editando_filial_id' not in st.session_state: st.session_state.editando_filial_id = None
 
+            # --- FORMULÁRIO DE FILIAL ---
             if st.session_state.editando_filial_id:
                 dados = db.executar_query("SELECT * FROM filiais WHERE id=%s", (st.session_state.editando_filial_id,), fetch=True)[0]
                 val_nome = dados['nome']; val_tel = dados['telefone_contato']; val_cep = dados['cep']
                 partes_end = dados['endereco'].split(',') if dados['endereco'] else [""]
                 val_rua = partes_end[0].strip(); val_comp = partes_end[1].strip() if len(partes_end) > 1 else ""
                 val_num = dados['numero']; val_bairro = dados['bairro']; val_cid = dados['cidade']; val_uf = dados['estado']
+                val_resp_nome = dados['responsavel_nome']
                 
                 st.session_state.form_filial['rua'] = val_rua; st.session_state.form_filial['bairro'] = val_bairro; st.session_state.form_filial['cidade'] = val_cid; st.session_state.form_filial['uf'] = val_uf
-                lbl_bt = "💾 Salvar Alterações"; expandir_form = True 
+                lbl_bt = "💾 Salvar Dados da Filial"; expandir_form = True 
             else:
-                val_nome, val_tel, val_cep, val_comp, val_num = "", "", "", "", ""
+                val_nome, val_tel, val_cep, val_comp, val_num, val_resp_nome = "", "", "", "", "", ""
                 val_rua = st.session_state.form_filial.get('rua', ""); val_bairro = st.session_state.form_filial.get('bairro', ""); val_cid = st.session_state.form_filial.get('cidade', ""); val_uf = st.session_state.form_filial.get('uf', "")
                 lbl_bt = "➕ Cadastrar Nova Filial"; expandir_form = False
 
-            with st.expander(f"{'✏️ Editando Filial' if st.session_state.editando_filial_id else '➕ Cadastrar Nova Filial'}", expanded=expandir_form):
-                c_nf, c_resp, c_tf = st.columns([2, 2, 1]) 
+            st.markdown("### 🏢 Filiais e Acessos")
+            
+            with st.expander(f"{'✏️ Editando Filial' if st.session_state.editando_filial_id else '➕ Nova Filial'}", expanded=expandir_form):
+                c_nf, c_resp = st.columns([2, 2]) # AJUSTADO LAYOUT
                 with c_nf: nf = st.text_input("Nome da Filial", value=val_nome)
+                
+                # --- AQUI: SELECTBOX PARA RESPONSÁVEL ---
                 with c_resp:
-                    users = db.executar_query("SELECT id, nome_completo FROM usuarios ORDER BY nome_completo", fetch=True)
-                    d_u = {u['nome_completo']: u['id'] for u in users} if users else {}
-                    resp = st.selectbox("Professor Responsável", list(d_u.keys())) if d_u else None
-                with c_tf: tf = st.text_input("Telefone", value=val_tel)
+                    # Busca todos os usuarios ativos para serem responsáveis
+                    users = db.executar_query("SELECT nome_completo FROM usuarios WHERE status_conta='Ativo' ORDER BY nome_completo", fetch=True)
+                    opts_users = [u['nome_completo'] for u in users] if users else []
+                    
+                    # Tenta achar o index atual na lista
+                    idx_r = 0
+                    if val_resp_nome and val_resp_nome in opts_users:
+                        idx_r = opts_users.index(val_resp_nome)
+                    
+                    resp_sel = st.selectbox("Professor Responsável", opts_users, index=idx_r) if opts_users else None
 
-                c_cep, c_rua, c_num, c_comp = st.columns([0.8, 2.5, 0.7, 1.2])
+                # Endereço
+                c_tf, c_cep = st.columns([2, 1])
+                with c_tf: tf = st.text_input("Telefone", value=val_tel)
                 with c_cep: cep = st.text_input("CEP", value=val_cep, key="cep_input_key", on_change=utils.buscar_dados_cep, max_chars=9)
+                
+                c_rua, c_num, c_comp = st.columns([3, 0.8, 1.5])
                 with c_rua: rua = st.text_input("Logradouro", value=val_rua) 
                 with c_num: num = st.text_input("Nº", value=val_num)
                 with c_comp: comp = st.text_input("Complemento", value=val_comp)
+                
                 c_bairro, c_cid, c_uf = st.columns([1.5, 1.5, 0.5])
                 with c_bairro: bairro = st.text_input("Bairro", value=val_bairro)
                 with c_cid: cidade = st.text_input("Cidade", value=val_cid)
                 with c_uf: uf = st.text_input("UF", value=val_uf, max_chars=2)
+                
                 st.write("")
                 bt1, bt2 = st.columns([1.5, 5]) 
                 if bt1.button(lbl_bt, type="primary", use_container_width=True):
-                    if nf and resp:
+                    if nf and resp_sel:
                         end_final = f"{rua}, {comp}" if comp else rua
                         if st.session_state.editando_filial_id:
-                            db.executar_query("UPDATE filiais SET nome=%s, responsavel_nome=%s, telefone_contato=%s, cep=%s, endereco=%s, numero=%s, bairro=%s, cidade=%s, estado=%s WHERE id=%s", (nf, resp, tf, cep, end_final, num, bairro, cidade, uf, st.session_state.editando_filial_id))
-                            st.success("Atualizado!"); st.session_state.editando_filial_id = None; time.sleep(1); st.rerun()
+                            db.executar_query("UPDATE filiais SET nome=%s, responsavel_nome=%s, telefone_contato=%s, cep=%s, endereco=%s, numero=%s, bairro=%s, cidade=%s, estado=%s WHERE id=%s", (nf, resp_sel, tf, cep, end_final, num, bairro, cidade, uf, st.session_state.editando_filial_id))
+                            st.success("Filial Atualizada!"); time.sleep(1); st.rerun()
                         else:
-                            db.executar_query("INSERT INTO filiais (nome, responsavel_nome, telefone_contato, cep, endereco, numero, bairro, cidade, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)", (nf, resp, tf, cep, end_final, num, bairro, cidade, uf))
-                            st.success("Cadastrado!"); time.sleep(1); st.rerun()
-                    else: st.error("Preencha campos.")
-                if bt2.button("🧹 Cancelar"):
+                            db.executar_query("INSERT INTO filiais (nome, responsavel_nome, telefone_contato, cep, endereco, numero, bairro, cidade, estado) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)", (nf, resp_sel, tf, cep, end_final, num, bairro, cidade, uf))
+                            st.success("Filial Criada!"); time.sleep(1); st.rerun()
+                    else: st.error("Nome e Responsável são obrigatórios.")
+                if bt2.button("🧹 Cancelar Edição"):
                     st.session_state.editando_filial_id = None; st.rerun()
 
+            # --- LISTA DE FILIAIS COM ADMINS ---
             st.divider()
             fs = db.executar_query("SELECT * FROM filiais ORDER BY nome", fetch=True)
+            
             if fs:
                 for f in fs:
+                    # Busca os admins desta filial específica
+                    admins_da_filial = db.executar_query("SELECT id, nome_completo, email FROM usuarios WHERE id_filial=%s AND perfil='adm_filial' AND status_conta='Ativo'", (f['id'],), fetch=True)
+                    
                     col_txt, col_btn = st.columns([0.9, 0.1])
                     with col_txt:
-                        q_alunos = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE id_filial=%s AND status_conta='Ativo' AND perfil='aluno'", (f['id'],), fetch=True)[0][0]
-                        with st.expander(f"🏢 {f['nome']} ({f['cidade']}) - {q_alunos} Alunos"):
-                            st.write(f"**Resp:** {f['responsavel_nome']} | **Tel:** {f['telefone_contato']}")
-                            st.caption(f"{f['endereco']}, {f['numero']} - {f['bairro']}")
-                    with col_btn:
-                        if st.button("✏️", key=f"ed_{f['id']}"): st.session_state.editando_filial_id = f['id']; st.rerun()
+                        with st.expander(f"📍 {f['nome']} ({len(admins_da_filial)} Admins)"):
+                            st.caption(f"{f['endereco']} - {f['cidade']}")
+                            st.caption(f"Responsável: **{f['responsavel_nome']}**")
+                            
+                            # LISTA DE ADMINS DESTA FILIAL
+                            st.markdown("##### 👮 Acesso Administrativo (Logins)")
+                            if admins_da_filial:
+                                for adm in admins_da_filial:
+                                    c_a1, c_a2 = st.columns([3, 1])
+                                    c_a1.write(f"👤 **{adm['nome_completo']}** ({adm['email']})")
+                                    if c_a2.button("Remover Acesso", key=f"del_adm_{adm['id']}"):
+                                        db.executar_query("UPDATE usuarios SET status_conta='Inativo' WHERE id=%s", (adm['id'],))
+                                        st.rerun()
+                            else:
+                                st.warning("⚠️ Esta filial não tem nenhum admin ativo!")
 
-        # 5. AVISOS (RESTAURADO ✅)
+                            # FORMULÁRIO PARA CRIAR NOVO ADMIN NESTA FILIAL
+                            st.markdown("---")
+                            st.markdown("###### ➕ Criar Novo Admin para esta Filial")
+                            with st.form(f"novo_admin_filial_{f['id']}"):
+                                c_na1, c_na2 = st.columns(2)
+                                new_adm_nome = c_na1.text_input("Nome")
+                                new_adm_email = c_na2.text_input("Email (Login)")
+                                new_adm_senha = st.text_input("Senha", type="password")
+                                
+                                if st.form_submit_button("Criar Acesso"):
+                                    if new_adm_nome and new_adm_email and new_adm_senha:
+                                        res = db.executar_query("""
+                                            INSERT INTO usuarios (nome_completo, email, senha, id_filial, perfil, status_conta) 
+                                            VALUES (%s, %s, %s, %s, 'adm_filial', 'Ativo')
+                                        """, (new_adm_nome, new_adm_email, new_adm_senha, f['id']))
+                                        
+                                        if res == "ERRO_DUPLICADO": st.error("Email já existe.")
+                                        else: st.success("Admin criado!"); time.sleep(1); st.rerun()
+                                    else: st.error("Preencha tudo.")
+
+                    with col_btn:
+                        if st.button("✏️", key=f"ed_f_{f['id']}", help="Editar Dados da Filial"): 
+                            st.session_state.editando_filial_id = f['id']; st.rerun()
+
+        # 6. AVISOS
         with tab_avisos:
             st.markdown("### 📢 Central de Comunicação da Rede")
             MODELOS = {
@@ -388,4 +451,5 @@ def painel_lider():
     # CONTEXTO 2: VISÃO DE AULAS (SEDE)
     # =======================================================
     elif modo_visao == "🥋 Minha Sede (Aulas)":
+        # Chama a visão de Admin da Filial (reaproveita código)
         admin_view.painel_adm_filial(renderizar_sidebar=False)
