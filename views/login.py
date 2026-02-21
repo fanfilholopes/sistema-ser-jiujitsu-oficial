@@ -55,8 +55,8 @@ def mostrar_login():
             with st.container(border=True):
                 st.info("Preencha para solicitar acesso.")
 
-                filiais = db.executar_query("SELECT id, nome, cidade FROM filiais ORDER BY nome", fetch=True)
-                opts_filial = {f"{f['nome']} ({f['cidade']})": f['id'] for f in filiais} if filiais else {}
+                filiais = db.executar_query("SELECT id, nome FROM filiais ORDER BY nome", fetch=True)
+                opts_filial = {f['nome']: f['id'] for f in filiais} if filiais else {}
                 
                 # --- FORMULÁRIO INTERATIVO (SEM st.form para permitir atualização) ---
                 
@@ -130,14 +130,21 @@ def mostrar_login():
                         data_grau_banco = dt_ultimo_grau if graus > 0 else dt_faixa
                         id_filial = opts_filial[filial_selecionada]
                         
+                        # NOVA LÓGICA: Separando o Try do Rerun e status = Pendente
+                        cadastrou = False
                         try:
                             db.executar_query(
                                 """INSERT INTO usuarios 
                                 (nome_completo, email, senha, telefone, data_nascimento, faixa, graus, id_filial, perfil, status_conta, data_inicio, data_graduacao, data_ultimo_grau, nome_responsavel, telefone_responsavel) 
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'aluno', 'Ativo', %s, %s, %s, %s, %s)""",
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'aluno', 'Pendente', %s, %s, %s, %s, %s)""",
                                 (nome, email_novo, senha_nova, zap, nasc, faixa, graus, id_filial, dt_inicio, dt_faixa, data_grau_banco, nm_resp, tel_resp)
                             )
-                            st.success("Conta criada! Redirecionando...")
-                            time.sleep(1.5)
+                            cadastrou = True
+                        except Exception as e:
+                            st.error("❌ E-mail já cadastrado.")
+                            
+                        # O Rerun acontece livre, leve e solto aqui fora!
+                        if cadastrou:
+                            st.success("✅ Solicitação enviada! Aguarde a aprovação do seu professor.")
+                            time.sleep(2)
                             st.rerun()
-                        except: st.error("E-mail já cadastrado.")

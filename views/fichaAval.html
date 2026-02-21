@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Avaliação - SER Jiu-Jitsu</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; padding: 20px; color: #333; }
+        .container { max-width: 1100px; margin: 0 auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        
+        /* -- CSS GERAL -- */
+        .control-panel { background-color: #e9ecef; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; border-left: 5px solid #d32f2f; }
+        .form-group { flex: 1; min-width: 200px; }
+        label { font-weight: bold; display: block; margin-bottom: 5px; color: #333; font-size: 0.9em; }
+        select, input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 1em; }
+        option:disabled { color: #999; font-style: italic; }
+
+        .main-title { background-color: #d32f2f; color: white; padding: 15px; text-align: center; font-size: 1.4em; font-weight: 800; text-transform: uppercase; border-radius: 6px; margin-bottom: 25px; letter-spacing: 1px; }
+
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: start; }
+        @media (max-width: 850px) { .grid-container { grid-template-columns: 1fr; } }
+        .full-width-grid { grid-template-columns: 1fr !important; }
+
+        .mini-table-wrapper { border: 1px solid #ddd; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .section-header { background-color: #000; color: white; padding: 10px 15px; font-weight: bold; text-transform: uppercase; font-size: 0.9em; display: flex; justify-content: space-between; align-items: center; }
+        .section-complete { background-color: #2e7d32 !important; } 
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: center; font-size: 0.95em; }
+        td.text-left { text-align: left; width: 50%; padding-left: 15px; color: #444; font-weight: 500; }
+        th.header-notas { background-color: #d32f2f; color: white; width: 10%; font-size: 0.9em; }
+
+        input[type="radio"] { transform: scale(1.4); cursor: pointer; accent-color: #d32f2f; }
+        .row-soma { background-color: #d32f2f; color: white; font-weight: bold; }
+        .row-media { background-color: #000; color: white; font-weight: bold; }
+        .input-media { background: #fff; color: #000; border: none; padding: 5px; width: 150px; text-align: center; font-weight: bold; border-radius: 3px; cursor: pointer; }
+        
+        .auto-tag { font-size: 0.7em; color: #2e7d32; background: #e8f5e9; padding: 2px 6px; border-radius: 4px; border: 1px solid #c8e6c9; margin-left: 10px; font-weight: normal; display: inline-block;}
+
+        .action-bar { margin-top: 30px; padding: 20px; background: #f8f9fa; border-top: 2px solid #ddd; text-align: right; border-radius: 0 0 8px 8px; display: flex; justify-content: space-between; align-items: center; }
+        .btn-save { background-color: #28a745; color: white; border: none; padding: 12px 30px; font-size: 1.1em; cursor: pointer; border-radius: 5px; font-weight: bold; transition: 0.3s; }
+        .btn-save:hover { background-color: #218838; transform: translateY(-1px); }
+        .btn-reset { background-color: #6c757d; color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 4px; }
+        .btn-print { background-color: #007bff; color: white; border: none; padding: 12px 20px; font-size: 1.1em; cursor: pointer; border-radius: 5px; font-weight: bold; margin-right: 10px; }
+
+        .result-box { margin-top: 30px; padding: 20px; border-radius: 8px; text-align: center; border: 2px solid #ccc; display: none; animation: fadeIn 0.5s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        .result-title { font-size: 1.2em; text-transform: uppercase; color: #555; margin-bottom: 10px; }
+        .result-status { font-size: 2.5em; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; }
+        .result-obs { margin-top: 10px; font-style: italic; color: #666; }
+        .status-aprovado { background-color: #d4edda; border-color: #c3e6cb; color: #155724; }
+        .status-ressalva { background-color: #fff3cd; border-color: #ffeeba; color: #856404; }
+        .status-reprovado { background-color: #f8d7da; border-color: #f5c6cb; color: #721c24; }
+
+        @media print {
+            .control-panel, .action-bar, .btn-reset { display: none !important; }
+            .container { box-shadow: none; border: none; padding: 0; }
+            body { background-color: white; }
+            .result-box { border: 2px solid #000; }
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="control-panel">
+        <div class="form-group">
+            <label>Aluno:</label>
+            <select id="alunoSelect" onchange="trocarAluno()">
+                <option value="aluno_1">João da Silva</option>
+                <option value="aluno_2">Maria Oliveira</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Nível do Exame (Faixa Alvo):</label>
+            <select id="faixaExameSelect" onchange="trocarAluno()">
+                <option value="2">Para Faixa Azul</option>
+                <option value="3">Para Faixa Roxa</option>
+                <option value="4">Para Faixa Marrom</option>
+                <option value="5">Para Faixa Preta</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label>Avaliador:</label>
+            <input type="text" id="avaliadorAtual" value="Fanfilho Lopes">
+        </div>
+        <div class="form-group">
+            <label>Etapa:</label>
+            <select id="grupoSelect" onchange="renderizarFicha()">
+                </select>
+        </div>
+    </div>
+
+    <div id="ficha-area" style="display:none;">
+        <div id="titulo-principal" class="main-title">TITULO</div>
+        <div id="grid-layout" class="grid-container"></div>
+        <div id="area-resultado"></div>
+
+        <div class="action-bar">
+            <div><button class="btn-reset" onclick="limparDadosAluno()">Limpar Aluno</button></div>
+            <div>
+                <button class="btn-print" onclick="window.print()">🖨️ Imprimir</button>
+                <button class="btn-save" onclick="salvarProgresso()">💾 Salvar Progresso</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- GABARITO ---
+    const gabarito = {
+        "iniciacao": {
+            titulo: "INICIAÇÃO DE LUTA",
+            ordem: 1,
+            cards: [
+                { id: "ini_geral", nome: "Situações Gerais", itens: ["Quedas com o braço", "Quedas de pernas", "Quedas de quadril", "Quedas de sacrifício", "Defesas / Contra golpe", "Ida para as costas", "Chamar p/ guarda", "Antecipação", "Torções", "Estrangulamentos"] }
+            ]
+        },
+        "desenvolvimento": {
+            titulo: "DESENVOLVIMENTO DA LUTA",
+            ordem: 2,
+            cards: [
+                { id: "dev_g_aberta", nome: "GUARDA ABERTA", itens: ["Raspagem", "Passagem", "Torções", "Estrangulamentos", "Ida para as costas"] },
+                { id: "dev_g_sentada", nome: "GUARDA SENTADA", itens: ["Raspagem", "Passagem", "Torções ou Estrangulamentos", "Ida para as costas"] },
+                { id: "dev_g_fechada", nome: "GUARDA FECHADA", itens: ["Raspagem", "Passagem", "Torções", "Estrangulamentos", "Ida para as costas"] },
+                { id: "dev_g_x", nome: "GUARDA X", itens: ["Raspagem", "Passagem", "Torções ou Estrangulamentos", "Ida para as costas"] },
+                { id: "dev_meia", nome: "MEIA GUARDA", itens: ["Raspagem", "Passagem", "Torções", "Estrangulamentos", "Ida para as costas"] },
+                { id: "dev_one_leg", nome: "ONE LEG", itens: ["Raspagem", "Passagem", "Torções ou Estrangulamentos", "Ida para as costas"] },
+                { id: "dev_delariva", nome: "GUARDA DE LA RIVA", itens: ["Raspagem", "Passagem", "Torções", "Estrangulamentos", "Ida para as costas"] },
+                { id: "dev_5050", nome: "GUARDA 50/50", itens: ["Raspagem", "Passagem", "Torções ou Estrangulamentos", "Ida para as costas"] },
+                { id: "dev_defesas", nome: "DEFESAS DE FINALIZAÇÕES", itens: ["Partindo das guardas"] },
+                
+                // TRAVA: Só aparece se o exame for para Marrom (4) ou Preta (5)
+                { id: "dev_pressoes", nome: "PRESSÕES (MARROM E PRETA)", req_faixa: 4, itens: ["Chaves de panturrilha, bíceps ou virilha"] }
+            ]
+        },
+        "dominios": {
+            titulo: "DOMÍNIOS",
+            ordem: 3,
+            cards: [
+                { id: "dom_100kg", nome: "100KG / JOELHO BARRIGA", itens: ["Torções", "Estrangulamentos", "Saídas / Reposições", "Ida para as costas"] },
+                { id: "dom_costas", nome: "COSTAS", itens: ["Torções", "Estrangulamentos", "Saídas / Reposições"] },
+                { id: "dom_montada", nome: "MONTADA", itens: ["Torções", "Estrangulamentos", "Saídas / Reposições", "Ida para as costas"] },
+                { id: "dom_4apoios", nome: "4 APOIOS", itens: ["Torções", "Estrangulamentos", "Saídas / Reposições", "Ida para as costas"] }
+            ]
+        },
+        "fechamento": {
+            titulo: "AVALIAÇÃO FINAL",
+            ordem: 4,
+            layout_largo: true,
+            cards: [
+                { 
+                    id: "resumo_final", 
+                    nome: "CONSOLIDADO DO EXAME", 
+                    rodape_soma: true,
+                    // Transformei itens em objetos para controlar requisito individualmente
+                    itens_obj: [
+                        { t: "Arte de cair" },
+                        { t: "Físico" },
+                        { t: "Iniciação" },
+                        { t: "Desenvolvimento" },
+                        { t: "Defesa de finalizações" },
+                        { t: "Pressões", req_faixa: 4 }, // Só Marrom+
+                        { t: "Domínios" },
+                        { t: "Arbitragem (Roxa acima)", req_faixa: 3 }, // Só Roxa+
+                        { t: "Luta sem kimono (Marrom e Preta)", req_faixa: 4 }, // Só Marrom+
+                        { t: "Competição" }
+                    ]
+                }
+            ]
+        }
+    };
+
+    let bancoDeDadosLocal = {}; 
+
+    function carregarDados() {
+        const dadosString = localStorage.getItem('ser_jiujitsu_db_v16'); 
+        if (dadosString) { bancoDeDadosLocal = JSON.parse(dadosString); } 
+        else { bancoDeDadosLocal = {}; }
+        atualizarMenuNavegacao();
+    }
+
+    function trocarAluno() {
+        document.getElementById('ficha-area').style.display = 'none';
+        atualizarMenuNavegacao();
+    }
+
+    // --- FUNÇÃO DE TRAVA INTELIGENTE ---
+    function verificarEtapaCompleta(alunoId, etapaKey) {
+        if (!bancoDeDadosLocal[alunoId] || !bancoDeDadosLocal[alunoId][etapaKey]) return false;
+        
+        const dadosSalvos = bancoDeDadosLocal[alunoId][etapaKey];
+        const gabaritoCards = gabarito[etapaKey].cards;
+        const faixaExame = parseInt(document.getElementById('faixaExameSelect').value);
+
+        for (let card of gabaritoCards) {
+            // Se o card exige faixa maior que a do exame, ignora (considera feito)
+            if (card.req_faixa && faixaExame < card.req_faixa) continue;
+
+            const salvo = dadosSalvos[card.id];
+            
+            // Se o card não foi salvo ou não está completo
+            if (!salvo || !salvo.completo) return false;
+
+            // Verificação granular para o card de Fechamento (itens individuais)
+            if (card.itens_obj) {
+                let itensNecessarios = 0;
+                card.itens_obj.forEach((item, idx) => {
+                    if (!item.req_faixa || faixaExame >= item.req_faixa) itensNecessarios++;
+                });
+                
+                let respondidosObrigatorios = 0;
+                card.itens_obj.forEach((item, idx) => {
+                     if ((!item.req_faixa || faixaExame >= item.req_faixa) && salvo.respostas[idx]) {
+                         respondidosObrigatorios++;
+                     }
+                });
+                
+                if (respondidosObrigatorios < itensNecessarios) return false;
+            }
+        }
+        return true;
+    }
+
+    function atualizarMenuNavegacao() {
+        const alunoId = document.getElementById('alunoSelect').value;
+        const select = document.getElementById('grupoSelect');
+        const valorAtual = select.value;
+        select.innerHTML = '<option value="">-- Escolha uma Etapa --</option>';
+
+        const etapas = [
+            { key: 'iniciacao', label: '1. Iniciação de Luta' },
+            { key: 'desenvolvimento', label: '2. Desenvolvimento da Luta' },
+            { key: 'dominios', label: '3. Domínios' },
+            { key: 'fechamento', label: '4. Fechamento / Resultado Final' }
+        ];
+
+        let etapaAnteriorCompleta = true; 
+        etapas.forEach(etapa => {
+            const option = document.createElement('option');
+            option.value = etapa.key;
+            
+            if (etapaAnteriorCompleta) {
+                const estaCompleta = verificarEtapaCompleta(alunoId, etapa.key);
+                const check = estaCompleta ? "✅ " : "";
+                option.text = check + etapa.label;
+                etapaAnteriorCompleta = estaCompleta; 
+            } else {
+                option.text = "🔒 " + etapa.label + " (Bloqueado)";
+                option.disabled = true;
+                etapaAnteriorCompleta = false;
+            }
+            if (etapa.key === 'fechamento' && !option.disabled) {
+                option.style.fontWeight = "bold"; option.style.color = "#d32f2f";
+            }
+            select.add(option);
+        });
+
+        if (valorAtual) {
+            const op = select.querySelector(`option[value="${valorAtual}"]`);
+            if (op && !op.disabled) select.value = valorAtual;
+            else { select.value = ""; document.getElementById('ficha-area').style.display = 'none'; }
+        }
+    }
+
+    function calcularPredominancia(alunoId, config) {
+        if (!bancoDeDadosLocal[alunoId] || !bancoDeDadosLocal[alunoId][config.etapa]) return null;
+        const dadosEtapa = bancoDeDadosLocal[alunoId][config.etapa];
+        let contagem = { "O": 0, "B": 0, "R": 0, "I": 0 };
+        let total = 0;
+        
+        const faixaExame = parseInt(document.getElementById('faixaExameSelect').value);
+        
+        Object.entries(dadosEtapa).forEach(([cardId, cardData]) => {
+            if (config.apenasCard && cardId !== config.apenasCard) return;
+            if (config.ignorarCards && config.ignorarCards.includes(cardId)) return;
+            
+            const cardGabarito = gabarito[config.etapa].cards.find(c => c.id === cardId);
+            if (cardGabarito && cardGabarito.req_faixa && faixaExame < cardGabarito.req_faixa) return;
+
+            if (cardData.respostas) {
+                Object.values(cardData.respostas).forEach(nota => { if (contagem[nota] !== undefined) { contagem[nota]++; total++; } });
+            }
+        });
+        if (total === 0) return null;
+        let vencedor = "O"; let max = -1;
+        ["O", "B", "R", "I"].forEach(nota => { if (contagem[nota] > max) { max = contagem[nota]; vencedor = nota; } });
+        return vencedor;
+    }
+
+    function renderizarFicha() {
+        const etapaKey = document.getElementById('grupoSelect').value;
+        const alunoId = document.getElementById('alunoSelect').value;
+        const faixaExame = parseInt(document.getElementById('faixaExameSelect').value);
+        
+        const area = document.getElementById('ficha-area');
+        const grid = document.getElementById('grid-layout');
+        const titulo = document.getElementById('titulo-principal');
+        const areaResultado = document.getElementById('area-resultado');
+
+        grid.innerHTML = "";
+        areaResultado.innerHTML = "";
+
+        if (!etapaKey) { area.style.display = "none"; return; }
+
+        const dadosEtapa = gabarito[etapaKey];
+        titulo.innerText = dadosEtapa.titulo;
+
+        if (dadosEtapa.layout_largo) grid.classList.add('full-width-grid');
+        else grid.classList.remove('full-width-grid');
+
+        const progressoAluno = bancoDeDadosLocal[alunoId] || {};
+        const progressoEtapa = progressoAluno[etapaKey] || {};
+
+        const mapaAutomatico = {
+            2: { etapa: 'iniciacao' },
+            3: { etapa: 'desenvolvimento', ignorarCards: ['dev_defesas', 'dev_pressoes'] }, 
+            4: { etapa: 'desenvolvimento', apenasCard: 'dev_defesas' },
+            5: { etapa: 'desenvolvimento', apenasCard: 'dev_pressoes' },
+            6: { etapa: 'dominios' }
+        };
+
+        dadosEtapa.cards.forEach(card => {
+            // --- FILTRO DE FAIXA: Se o aluno não tem faixa pra esse card, não renderiza ---
+            if (card.req_faixa && faixaExame < card.req_faixa) return;
+
+            const dadosCardSalvo = progressoEtapa[card.id]; 
+            const estaCompleto = dadosCardSalvo && dadosCardSalvo.completo;
+            
+            let headerClass = "section-header";
+            let avaliadorLabel = "";
+            if (estaCompleto) {
+                headerClass += " section-complete";
+                avaliadorLabel = `<span style="font-size:0.7em; background:rgba(255,255,255,0.2); padding:2px 5px; border-radius:3px;">✅ ${dadosCardSalvo.avaliador}</span>`;
+            }
+
+            let html = `
+            <div class="mini-table-wrapper" id="card_wrapper_${card.id}">
+                <div class="${headerClass}"><span>${card.nome}</span>${avaliadorLabel}</div>
+                <table id="tabela_${card.id}">
+                    <thead>
+                        <tr>
+                            <th style="text-align:left; padding-left:10px;">Critérios</th>
+                            <th class="header-notas">O</th><th class="header-notas">B</th><th class="header-notas">R</th><th class="header-notas">I</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            const listaItens = card.itens_obj || card.itens.map(t => ({ t: t }));
+
+            listaItens.forEach((itemObj, index) => {
+                // --- FILTRO DE ITEM INDIVIDUAL (Para a tabela final) ---
+                if (itemObj.req_faixa && faixaExame < itemObj.req_faixa) return;
+
+                const uniqueName = `radio_${etapaKey}_${card.id}_${index}`;
+                let checkO="", checkB="", checkR="", checkI="";
+                let foiCalculado = false;
+                let val = null;
+
+                if (dadosCardSalvo && dadosCardSalvo.respostas && dadosCardSalvo.respostas[index]) {
+                    val = dadosCardSalvo.respostas[index];
+                } else if (etapaKey === 'fechamento' && mapaAutomatico[index]) {
+                    const config = mapaAutomatico[index];
+                    const sugestao = calcularPredominancia(alunoId, config);
+                    if (sugestao) { val = sugestao; foiCalculado = true; }
+                }
+
+                if(val==="O") checkO="checked"; if(val==="B") checkB="checked";
+                if(val==="R") checkR="checked"; if(val==="I") checkI="checked";
+
+                const onC = card.rodape_soma ? `onclick="calcularSomaTempoReal('${card.id}')"` : "";
+                const textoItem = foiCalculado ? `${itemObj.t} <span class="auto-tag">🤖 Auto</span>` : itemObj.t;
+
+                html += `
+                    <tr>
+                        <td class="text-left">${textoItem}</td>
+                        <td><input type="radio" name="${uniqueName}" value="O" ${checkO} ${onC}></td>
+                        <td><input type="radio" name="${uniqueName}" value="B" ${checkB} ${onC}></td>
+                        <td><input type="radio" name="${uniqueName}" value="R" ${checkR} ${onC}></td>
+                        <td><input type="radio" name="${uniqueName}" value="I" ${checkI} ${onC}></td>
+                    </tr>
+                `;
+            });
+
+            if (card.rodape_soma) {
+                const mediaSalva = dadosCardSalvo ? dadosCardSalvo.mediaFinal : "";
+                html += `
+                    <tr class="row-soma">
+                        <td style="text-align:right; padding-right:15px;">SOMA:</td>
+                        <td id="soma_O_${card.id}">0</td> <td id="soma_B_${card.id}">0</td> <td id="soma_R_${card.id}">0</td> <td id="soma_I_${card.id}">0</td>
+                    </tr>
+                    <tr class="row-media">
+                        <td style="text-align:right; padding-right:15px;">MÉDIA FINAL:</td>
+                        <td colspan="4">
+                            <select id="media_final_${card.id}" class="input-media" onchange="exibirResultado(this.value)">
+                                <option value="">-</option>
+                                <option value="O" ${mediaSalva==="O"?'selected':''}>ÓTIMO</option>
+                                <option value="B" ${mediaSalva==="B"?'selected':''}>BOM</option>
+                                <option value="R" ${mediaSalva==="R"?'selected':''}>REGULAR</option>
+                                <option value="I" ${mediaSalva==="I"?'selected':''}>INSUFICIENTE</option>
+                            </select>
+                        </td>
+                    </tr>
+                `;
+            }
+            html += `</tbody></table></div>`;
+            grid.innerHTML += html;
+            if (card.rodape_soma) { calcularSomaTempoReal(card.id); }
+        });
+        area.style.display = "block";
+    }
+
+    function exibirResultado(media) {
+        const area = document.getElementById('area-resultado');
+        if (!media) { area.innerHTML = ""; return; }
+        let status = "", classe = "", texto = "";
+        if (media === "O" || media === "B") { status = "APROVADO"; classe = "status-aprovado"; texto = "O aluno demonstrou excelência técnica e cumpre os requisitos para a graduação."; } 
+        else if (media === "R") { status = "APROVADO COM RESSALVAS"; classe = "status-ressalva"; texto = "O aluno foi aprovado, mas necessita de ajustes técnicos em pontos específicos."; } 
+        else if (media === "I") { status = "NÃO APROVADO"; classe = "status-reprovado"; texto = "O aluno ainda não atingiu o nível técnico necessário."; }
+        area.innerHTML = `
+            <div class="result-box ${classe}" style="display:block;">
+                <div class="result-title">Resultado da Avaliação</div>
+                <div class="result-status">${status}</div>
+                <div class="result-obs">${texto}</div>
+                <div style="margin-top:20px; font-size:0.9em;">
+                    Assinado digitalmente por: <strong>${document.getElementById('avaliadorAtual').value}</strong> em ${new Date().toLocaleDateString()}
+                </div>
+            </div>`;
+    }
+
+    function calcularSomaTempoReal(cardId) {
+        let contagem = { "O": 0, "B": 0, "R": 0, "I": 0 };
+        const tabela = document.getElementById(`tabela_${cardId}`);
+        const radios = tabela.querySelectorAll('input[type="radio"]:checked');
+        let totalRespondidos = radios.length;
+        
+        const linhasVisiveis = tabela.querySelectorAll('tbody tr').length - 2; 
+
+        radios.forEach(r => { if (contagem[r.value] !== undefined) contagem[r.value]++; });
+
+        document.getElementById(`soma_O_${cardId}`).innerText = contagem["O"];
+        document.getElementById(`soma_B_${cardId}`).innerText = contagem["B"];
+        document.getElementById(`soma_R_${cardId}`).innerText = contagem["R"];
+        document.getElementById(`soma_I_${cardId}`).innerText = contagem["I"];
+
+        const selectMedia = document.getElementById(`media_final_${cardId}`);
+        if (totalRespondidos >= linhasVisiveis && linhasVisiveis > 0) {
+            let vencedor = "O"; let max = -1;
+            ["O", "B", "R", "I"].forEach(nota => { if (contagem[nota] > max) { max = contagem[nota]; vencedor = nota; } });
+            if (selectMedia.value === "" || selectMedia.value === "-") { selectMedia.value = vencedor; }
+            exibirResultado(selectMedia.value);
+        } else {
+            exibirResultado(null);
+        }
+    }
+
+    function salvarProgresso() {
+        const etapaKey = document.getElementById('grupoSelect').value;
+        const alunoId = document.getElementById('alunoSelect').value;
+        const avaliadorNome = document.getElementById('avaliadorAtual').value;
+        const faixaExame = parseInt(document.getElementById('faixaExameSelect').value);
+
+        if (!etapaKey) return;
+        if (!bancoDeDadosLocal[alunoId]) bancoDeDadosLocal[alunoId] = {};
+        if (!bancoDeDadosLocal[alunoId][etapaKey]) bancoDeDadosLocal[alunoId][etapaKey] = {};
+        const dadosEtapa = gabarito[etapaKey];
+        
+        let etapaCompletaAgora = true;
+
+        dadosEtapa.cards.forEach(card => {
+            if (card.req_faixa && faixaExame < card.req_faixa) return; 
+
+            let respostasCard = {};
+            let countRespondidos = 0;
+            const listaItens = card.itens_obj || card.itens.map(t => ({ t: t }));
+            
+            let itensNecessariosParaFaixa = 0;
+
+            listaItens.forEach((itemObj, index) => {
+                if (itemObj.req_faixa && faixaExame < itemObj.req_faixa) return; 
+                itensNecessariosParaFaixa++;
+                
+                const uniqueName = `radio_${etapaKey}_${card.id}_${index}`;
+                const radios = document.getElementsByName(uniqueName);
+                for (const r of radios) { if (r.checked) { respostasCard[index] = r.value; countRespondidos++; } }
+            });
+
+            let mediaFinal = null;
+            if (card.rodape_soma) { mediaFinal = document.getElementById(`media_final_${card.id}`).value; }
+            
+            const isCompleto = (countRespondidos === itensNecessariosParaFaixa);
+            if (!isCompleto) etapaCompletaAgora = false;
+
+            if (countRespondidos > 0 || mediaFinal) {
+                bancoDeDadosLocal[alunoId][etapaKey][card.id] = {
+                    avaliador: avaliadorNome, data: new Date().toISOString(),
+                    respostas: respostasCard, mediaFinal: mediaFinal, completo: isCompleto
+                };
+            }
+        });
+
+        localStorage.setItem('ser_jiujitsu_db_v16', JSON.stringify(bancoDeDadosLocal));
+        atualizarMenuNavegacao();
+        if(etapaCompletaAgora) { alert("✅ Etapa concluída! Próxima fase desbloqueada."); } 
+        else { alert("💾 Salvo. Complete os itens visíveis para avançar."); }
+        renderizarFicha();
+    }
+
+    function limparDadosAluno() {
+        if(confirm(`Apagar histórico?`)) {
+            const id = document.getElementById('alunoSelect').value;
+            delete bancoDeDadosLocal[id];
+            localStorage.setItem('ser_jiujitsu_db_v16', JSON.stringify(bancoDeDadosLocal));
+            atualizarMenuNavegacao();
+            document.getElementById('ficha-area').style.display = 'none';
+        }
+    }
+
+    carregarDados();
+</script>
+
+</body>
+</html>
