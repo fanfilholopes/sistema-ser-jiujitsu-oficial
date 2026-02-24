@@ -12,8 +12,9 @@ def painel_lider():
     user = st.session_state.usuario
     
     # --- SIDEBAR ---
-    try: st.sidebar.image("logoser.jpg", width=150)
-    except: pass
+    foto_url = user.get('foto_perfil') if user.get('foto_perfil') else "logoser.jpg"
+    try: st.sidebar.image(foto_url, width=150)
+    except: st.sidebar.image("logoser.jpg", width=150)
     
     st.sidebar.title("Painel Mestre 👑")
     st.sidebar.caption(f"Olá, {user['nome_completo']}")
@@ -68,7 +69,6 @@ def painel_lider():
             qtd_niver = len(aniversariantes) if aniversariantes else 0
 
             # --- KPIs REORGANIZADOS EM 2 BLOCOS ---
-            
             st.markdown("##### 👥 Alunos e Operação")
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Alunos Ativos", total_alunos)
@@ -162,7 +162,7 @@ def painel_lider():
                     st.dataframe(df_comp, use_container_width=True)
                 else: st.info("Sem medalhas.")
 
-        # 2. ALUNOS GLOBAL (CORREÇÃO DE DATAS E MENSAGEM DUPLA)
+        # 2. ALUNOS GLOBAL
         with tab_alunos_global:
             if 'lider_edit_aluno_id' not in st.session_state: st.session_state.lider_edit_aluno_id = None
             
@@ -173,7 +173,6 @@ def painel_lider():
 
                 c_data, c_aviso = st.columns([1, 2])
                 
-                # CORREÇÃO 1: Datas liberadas desde 1900
                 nasc_reg = c_data.date_input("Data de Nascimento", value=date(2000, 1, 1), min_value=date(1900, 1, 1), max_value=date.today())
                 
                 idade = (date.today() - nasc_reg).days // 365
@@ -190,7 +189,6 @@ def painel_lider():
                     faixa_reg = c3.selectbox("Faixa Inicial", utils.ORDEM_FAIXAS)
                     grau_reg = c4.selectbox("Grau", [0,1,2,3,4])
                     
-                    # CORREÇÃO 1: Datas liberadas
                     dt_inicio_reg = c5.date_input("Data de Início", value=date.today(), min_value=date(1900,1,1))
                     dt_ult_grau_reg = c_ug.date_input("Data Último Grau", value=None, min_value=date(1900,1,1))
                     
@@ -221,13 +219,12 @@ def painel_lider():
                                 (novo_nome_reg, novo_email_reg, novo_zap_reg, nasc_reg, faixa_reg, grau_reg, id_filial_sel, dt_inicio_reg, data_grad_final, nm_resp, tel_resp)
                             )
                             
-                            # CORREÇÃO 2: Lógica de retorno estrita para evitar mensagem dupla
                             if res == "ERRO_DUPLICADO": 
                                 st.error("E-mail já cadastrado!")
                             elif res: 
                                 st.success("Matriculado com sucesso!")
                                 time.sleep(1)
-                                st.rerun() # Força recarregamento para limpar o form e não repetir a ação
+                                st.rerun()
 
             st.markdown("---")
 
@@ -427,11 +424,11 @@ def painel_lider():
                                 except Exception as e:
                                     st.error("Erro ao excluir. Verifique se há alunos vinculados.")
                                 
-                                # Rerun fora do try!
                                 if excluiu:
                                     st.success("Filial removida!")
                                     time.sleep(1)
                                     st.rerun()
+
                         # COLUNA DA DIREITA: ADMINS
                         with col_admins:
                             st.markdown("##### 👮 Admins")
@@ -440,15 +437,12 @@ def painel_lider():
                                     c_a1, c_a2 = st.columns([3, 1])
                                     c_a1.write(f"👤 {adm['nome_completo']}")
                                     if c_a2.button("🗑️", key=f"rm_adm_{adm['id']}"):
-                                        # Remove o privilégio de admin (volta a ser aluno ou inativa? Por segurança, vamos Inativar para não deixar usuário solto)
-                                        # Ou melhor: vamos perguntar? Para simplificar, vou inativar o acesso.
                                         db.executar_query("UPDATE usuarios SET status_conta='Inativo' WHERE id=%s", (adm['id'],))
                                         st.rerun()
                             else: st.info("Sem admins.")
 
                             st.markdown("---")
                             
-                            # --- NOVO POPOVER COM ABAS ---
                             with st.popover("➕ Novo Admin"):
                                 st.write(f"Gerenciar Admin: **{f['nome']}**")
                                 tab_novo, tab_existente = st.tabs(["🆕 Cadastrar Externo", "🔄 Vincular Existente"])
@@ -472,7 +466,6 @@ def painel_lider():
                                         sel_usuario_promover = st.selectbox("Selecione o Usuário", list(mapa_todos_usuarios.keys()), key=f"sel_prom_{f['id']}")
                                         if st.button("Tornar Admin desta Filial", key=f"btn_prom_{f['id']}"):
                                             id_user_promover = mapa_todos_usuarios[sel_usuario_promover]
-                                            # Atualiza o perfil para adm_filial e move para esta filial
                                             db.executar_query("UPDATE usuarios SET perfil='adm_filial', id_filial=%s WHERE id=%s", (f['id'], id_user_promover))
                                             st.success("Usuário promovido a Admin!"); time.sleep(1); st.rerun()
                                     else:

@@ -17,10 +17,16 @@ def painel_adm_filial(renderizar_sidebar=True):
         nome_filial = db.executar_query("SELECT nome FROM filiais WHERE id=%s", (id_filial,), fetch=True)
         nome_f = nome_filial[0]['nome'] if nome_filial else "Filial"
         
-        try: st.sidebar.image("logoser.jpg", width=150)
-        except: pass
+        # LÓGICA DA FOTO DE PERFIL
+        # Tenta pegar a foto do banco. Se for None ou vazio, usa a logo padrão.
+        foto_url = user.get('foto_perfil') if user.get('foto_perfil') else "logoser.jpg"
+        
+        try: st.sidebar.image(foto_url, width=150)
+        except: st.sidebar.image("logoser.jpg", width=150) # Fallback de segurança
+        
         st.sidebar.markdown(f"## {nome_f}")
-        st.sidebar.caption(f"{utils.CARGOS.get(perfil, perfil).upper()}")
+        st.sidebar.caption(f"Olá, {user['nome_completo']}") # <-- Nome adicionado aqui!
+        st.sidebar.caption(f"🛡️ {utils.CARGOS.get(perfil, perfil).upper()}")
         st.sidebar.markdown("---")
         if st.sidebar.button("Sair"):
             st.session_state.logado = False
@@ -324,7 +330,18 @@ def painel_adm_filial(renderizar_sidebar=True):
                 pres = a['presencas_validas']
                 apto, msg, prog, troca = utils.calcular_status_graduacao(a, pres)
                 with st.expander(f"{'🔥' if apto else '⏳'} {a['nome_completo']} - {msg}"):
-                    st.progress(prog)
+                    
+                    # --- TRAVA DE SEGURANÇA NA BARRA DE PROGRESSO ---
+                    try:
+                        if isinstance(prog, int) or prog > 1.0:
+                            prog_seguro = max(0, min(100, int(prog)))
+                        else:
+                            prog_seguro = max(0.0, min(1.0, float(prog)))
+                    except:
+                        prog_seguro = 0.0
+                    st.progress(prog_seguro)
+                    # ------------------------------------------------
+
                     c1, c2 = st.columns(2)
                     if c1.button("+1 Grau", key=f"g_{a['id']}"):
                         db.executar_query("UPDATE usuarios SET graus = graus + 1, data_ultimo_grau = CURRENT_DATE WHERE id=%s", (a['id'],)); st.toast("Grau adicionado!"); time.sleep(0.5); st.rerun()
