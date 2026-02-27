@@ -462,19 +462,25 @@ def painel_adm_filial(renderizar_sidebar=True):
                         st.caption("Ainda não há alunos nesta turma.")
                         
                 with col_out:
-                    st.warning("⚠️ Alunos Disponíveis")
-                    alunos_out = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE (id_turma IS NULL OR id_turma != %s) AND id_filial=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor') ORDER BY nome_completo", (id_t_alvo, id_filial), fetch=True)
+                    st.warning("⚠️ Alunos Sem Turma") # Mudei o título para ficar mais claro
+                    
+                    # A MÁGICA ACONTECE AQUI: Deixamos apenas 'id_turma IS NULL' e removemos o id_t_alvo dos parâmetros
+                    alunos_out = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_turma IS NULL AND id_filial=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor') ORDER BY nome_completo", (id_filial,), fetch=True)
+                    
                     filtro = st.text_input("🔎 Buscar", placeholder="Nome...")
                     st.write("") 
                     
-                    for a in alunos_out:
-                        if filtro.lower() in a['nome_completo'].lower():
-                            c_nome, c_btn = st.columns([5, 1])
-                            c_nome.markdown(f"<div style='margin-top: 5px;'>👤 {a['nome_completo']}</div>", unsafe_allow_html=True)
-                            if c_btn.button("➕", key=f"add_{a['id']}", help="Matricular nesta turma"):
-                                db.executar_query("UPDATE usuarios SET id_turma=%s WHERE id=%s", (id_t_alvo, a['id']))
-                                st.toast("Adicionado!"); time.sleep(0.5); st.rerun()
-                            st.markdown('<hr style="margin: 0px; border: none; border-top: 1px solid #333;">', unsafe_allow_html=True)
+                    if alunos_out:
+                        for a in alunos_out:
+                            if filtro.lower() in a['nome_completo'].lower():
+                                c_nome, c_btn = st.columns([5, 1])
+                                c_nome.markdown(f"<div style='margin-top: 5px;'>👤 {a['nome_completo']}</div>", unsafe_allow_html=True)
+                                if c_btn.button("➕", key=f"add_{a['id']}", help="Matricular nesta turma"):
+                                    db.executar_query("UPDATE usuarios SET id_turma=%s WHERE id=%s", (id_t_alvo, a['id']))
+                                    st.toast("Adicionado!"); time.sleep(0.5); st.rerun()
+                                st.markdown('<hr style="margin: 0px; border: none; border-top: 1px solid #333;">', unsafe_allow_html=True)
+                    else:
+                        st.caption("Todos os alunos ativos já estão em alguma turma.")
 
     # =======================================================
     # 6. ALUNOS
