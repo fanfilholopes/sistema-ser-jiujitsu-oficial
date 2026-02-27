@@ -4,22 +4,72 @@ import utils
 import pandas as pd
 from datetime import date
 import time
+import os
 
 def painel_professor():
     user = st.session_state.usuario
     id_filial = user['id_filial']
     id_prof = user['id']
+    perfil = user.get('perfil', 'professor')
 
-    # --- SIDEBAR SIMPLES ---
-    try: st.sidebar.image("logoser.jpg", width=150)
-    except: pass
-    st.sidebar.title("Área do Professor 🥋")
-    st.sidebar.caption(f"Olá, {user['nome_completo']}")
+    # =======================================================
+    # --- SIDEBAR PADRONIZADA ---
+    # =======================================================
+    
+    # 1. FOTO DO USUÁRIO LOGADO
+    foto_url = user.get('foto_perfil')
+    
+    col_foto, col_vazia = st.sidebar.columns([1, 0.2])
+    with col_foto:
+        if foto_url and os.path.exists(foto_url):
+            try: 
+                st.image(foto_url, width=120)
+            except: 
+                st.markdown("## 👤")
+        else:
+            st.markdown("## 👤") # Fallback se não tiver foto
+
+    st.sidebar.markdown(f"### {user['nome_completo']}")
+    cargo_texto = utils.CARGOS.get(perfil, perfil).upper()
+    st.sidebar.caption(f"🛡️ {cargo_texto}")
+    
+    # 2. BOTÃO DE "MEU PERFIL" (UPLOAD DE FOTO)
+    with st.sidebar.popover("⚙️ Meu Perfil", use_container_width=True):
+        st.markdown("#### Atualizar Foto")
+        nova_foto = st.file_uploader("Escolha uma imagem", type=["jpg", "jpeg", "png"])
+        
+        if nova_foto is not None:
+            if st.button("💾 Salvar Foto", use_container_width=True):
+                pasta_fotos = "fotos_perfil"
+                os.makedirs(pasta_fotos, exist_ok=True)
+                
+                caminho_foto = os.path.join(pasta_fotos, f"user_{user['id']}_{nova_foto.name}")
+                with open(caminho_foto, "wb") as f:
+                    f.write(nova_foto.getbuffer())
+                
+                db.executar_query("UPDATE usuarios SET foto_perfil=%s WHERE id=%s", (caminho_foto, user['id']))
+                st.session_state.usuario['foto_perfil'] = caminho_foto
+                
+                st.success("Foto atualizada! Oss!")
+                time.sleep(1)
+                st.rerun()
+
+    st.sidebar.markdown("---")
+    
     if st.sidebar.button("Sair"):
         st.session_state.logado = False
         st.rerun()
 
+    # 3. LOGO DO SISTEMA NO RODAPÉ
+    st.sidebar.markdown("<br><br><br><br>", unsafe_allow_html=True)
+    try:
+        st.sidebar.image("logoser.jpg", use_container_width=True)
+    except:
+        pass
+
+    # =======================================================
     # --- ABA ÚNICA: GESTÃO DE AULAS ---
+    # =======================================================
     st.title("🛡️ Gestão de Tatame")
     
     # 1. VALIDAÇÃO DE CHECK-INS (O ACEITE)
@@ -38,7 +88,7 @@ def painel_professor():
         AND (t.id_professor = %s OR %s IS NULL) -- Mostra turmas do prof ou todas se ele não tiver turma
         ORDER BY t.horario
     """, (id_filial, id_prof, None), fetch=True) 
-    # Obs: Ajustei a query para ser generosa. Se quiser restringir só às turmas DELE, tire o "OR %s IS NULL".
+    # Obs: Ajustada a query para ser generosa. Se quiser restringir só às turmas DELE, tire o "OR %s IS NULL".
 
     if pendencias:
         st.info(f"Você tem {len(pendencias)} alunos aguardando liberação para o treino.")

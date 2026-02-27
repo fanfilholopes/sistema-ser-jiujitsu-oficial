@@ -5,7 +5,6 @@ import pandas as pd
 from datetime import date
 import time
 
-# ALTERAÇÃO AQUI: Adicionado parâmetro opcional
 def painel_aluno(renderizar_sidebar=True):
     user = st.session_state.usuario
     
@@ -16,7 +15,7 @@ def painel_aluno(renderizar_sidebar=True):
         'Roxa': '#800080', 'Marrom': '#8B4513', 'Preta': '#000000'
     }
 
-    # --- BUSCAR DADOS EXTRAS (Fica fora do if pois usamos no card principal) ---
+    # --- BUSCAR DADOS EXTRAS ---
     filial_data = db.executar_query("SELECT nome FROM filiais WHERE id=%s", (user['id_filial'],), fetch=True)
     nome_filial = filial_data[0]['nome'] if filial_data else "Matriz / Sede"
 
@@ -29,10 +28,15 @@ def painel_aluno(renderizar_sidebar=True):
             nome_turma = t['nome']
             detalhes_turma = f"{t['dias']} às {t['horario']}"
 
-    # --- SIDEBAR (Só renderiza se for Aluno puro) ---
+    # =======================================================
+    # --- SIDEBAR PADRONIZADA (Só renderiza se for Aluno puro) ---
+    # =======================================================
     if renderizar_sidebar:
-        try: st.sidebar.image("logoser.jpg", width=150)
-        except: pass
+        try: 
+            st.sidebar.image("logoser.jpg", width=150)
+        except: 
+            pass
+
         st.sidebar.markdown("## Área do Aluno")
         st.sidebar.caption(f"Olá, {user['nome_completo']}")
         
@@ -40,20 +44,37 @@ def painel_aluno(renderizar_sidebar=True):
         st.sidebar.markdown(f"🥋 **{user['faixa']}** ({user['graus']}º Grau)")
         
         st.sidebar.markdown("---")
+        
+        # 3. NAVEGAÇÃO OTIMIZADA
+        st.sidebar.markdown("### 📌 Menu")
+        menu_selecionado = st.sidebar.radio(
+            "Navegação", 
+            ["🏠 Meu Tatame", "📜 Histórico", "🏅 Competições"], 
+            label_visibility="collapsed"
+        )
+
+        st.sidebar.markdown("---")
         if st.sidebar.button("Sair", key="sair_aluno"):
             st.session_state.logado = False
             st.rerun()
 
+    else:
+        # Quando chamado pelo monitor.py, renderiza um menu horizontal limpo no topo
+        menu_selecionado = st.radio(
+            "Navegação do Aluno", 
+            ["🏠 Meu Tatame", "📜 Histórico", "🏅 Competições"], 
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        st.divider()
+
+
     # =======================================================
-    # CONTEÚDO PRINCIPAL (Exibido para Aluno e Monitor)
+    # CONTEÚDO PRINCIPAL (Alta Performance)
     # =======================================================
     
-    # NOVA ABA: COMPETIÇÕES
-    tab_home, tab_hist, tab_comp = st.tabs(["🏠 Meu Tatame", "📜 Histórico", "🏅 Competições"])
-
-    with tab_home:
-        # --- RANKING CURIOSIDADE (NOVO!) ---
-        # Conta a posição do aluno no ranking anual da filial
+    if menu_selecionado == "🏠 Meu Tatame":
+        # --- RANKING CURIOSIDADE ---
         sql_rank = """
             SELECT id_aluno, COUNT(*) as qtd 
             FROM checkins 
@@ -71,7 +92,6 @@ def painel_aluno(renderizar_sidebar=True):
                     posicao = f"{idx + 1}º"
                     break
         
-        # Exibe a posição logo no topo
         c_rank, c_msg = st.columns([1, 2])
         c_rank.metric("🏆 Ranking Anual", posicao, delta="Casca Grossa", delta_color="off")
         c_msg.info("Treine com constância para subir no ranking da equipe!")
@@ -182,9 +202,8 @@ def painel_aluno(renderizar_sidebar=True):
             k1.metric("Treinos (Total)", total)
             k2.metric("Treinos (Este Mês)", db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_aluno=%s AND validado=TRUE AND EXTRACT(MONTH FROM data_aula) = EXTRACT(MONTH FROM CURRENT_DATE)", (user['id'],), fetch=True)[0][0])
 
-    with tab_hist:
+    elif menu_selecionado == "📜 Histórico":
         st.markdown("### 📅 Meus Treinos")
-        # Mostrando tabela para ficar igual ao seu código original, mas dentro da aba
         with st.expander("📅 Ver Histórico de Presença", expanded=True):
             hist = db.executar_query("SELECT data_aula, 'Presente' as status FROM checkins WHERE id_aluno=%s AND validado=TRUE ORDER BY data_aula DESC LIMIT 10", (user['id'],), fetch=True)
             if hist: 
@@ -193,8 +212,7 @@ def painel_aluno(renderizar_sidebar=True):
                 st.dataframe(df_hist, use_container_width=True, hide_index=True)
             else: st.info("Nenhum treino validado registrado ainda.")
 
-    # --- NOVA ABA: COMPETIÇÕES ---
-    with tab_comp:
+    elif menu_selecionado == "🏅 Competições":
         st.markdown("### 🥇 Minhas Conquistas")
         
         # Formulário de Envio

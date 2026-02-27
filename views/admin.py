@@ -17,27 +17,43 @@ def painel_adm_filial(renderizar_sidebar=True):
         nome_filial = db.executar_query("SELECT nome FROM filiais WHERE id=%s", (id_filial,), fetch=True)
         nome_f = nome_filial[0]['nome'] if nome_filial else "Filial"
         
-        # LÓGICA DA FOTO DE PERFIL
-        # Tenta pegar a foto do banco. Se for None ou vazio, usa a logo padrão.
-        foto_url = user.get('foto_perfil') if user.get('foto_perfil') else "logoser.jpg"
-        
-        try: st.sidebar.image(foto_url, width=150)
-        except: st.sidebar.image("logoser.jpg", width=150) # Fallback de segurança
+        # --- SIDEBAR PADRONIZADA (Sem foto, com Logo) ---
+        try: 
+            st.sidebar.image("logoser.jpg", width=150)
+        except: 
+            pass
         
         st.sidebar.markdown(f"## {nome_f}")
-        st.sidebar.caption(f"Olá, {user['nome_completo']}") # <-- Nome adicionado aqui!
+        st.sidebar.caption(f"Olá, {user['nome_completo']}")
         st.sidebar.caption(f"🛡️ {utils.CARGOS.get(perfil, perfil).upper()}")
         st.sidebar.markdown("---")
-        if st.sidebar.button("Sair"):
+        
+        # --- MENU DE NAVEGAÇÃO OTIMIZADO ---
+        st.sidebar.markdown("### 📌 Menu")
+        menu_selecionado = st.sidebar.radio(
+            "Navegação", 
+            ["📊 Painel", "✅ Chamada", "🏆 Rankings", "🎓 Graduações", "📅 Turmas", "👥 Alunos"], 
+            label_visibility="collapsed"
+        )
+        st.sidebar.markdown("---")
+        
+        if st.sidebar.button("Sair", use_container_width=True):
             st.session_state.logado = False
             st.rerun()
-
-    tab_dash, tab_chamada, tab_rank, tab_grad, tab_turmas, tab_alunos = st.tabs(["📊 Painel", "✅ Chamada", "🏆 Rankings", "🎓 Graduações", "📅 Turmas", "👥 Alunos"])
+    else:
+        # Quando chamado pelo lider.py (sem sidebar), renderiza um menu horizontal no topo
+        menu_selecionado = st.radio(
+            "Navegação da Filial", 
+            ["📊 Painel", "✅ Chamada", "🏆 Rankings", "🎓 Graduações", "📅 Turmas", "👥 Alunos"], 
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        st.divider()
 
     # =======================================================
     # 1. DASHBOARD
     # =======================================================
-    with tab_dash:
+    if menu_selecionado == "📊 Painel":
         avisos = db.executar_query("SELECT titulo, mensagem, data_postagem FROM avisos WHERE ativo=TRUE AND publico_alvo IN ('Todos', 'Admins Filiais', 'Professores') ORDER BY id DESC", fetch=True)
         if avisos:
             with st.expander("📢 Mural de Avisos", expanded=True):
@@ -50,9 +66,15 @@ def painel_adm_filial(renderizar_sidebar=True):
         qtd_ativos, qtd_inativos, qtd_pendentes = mapa.get('Ativo', 0), mapa.get('Inativo', 0), mapa.get('Pendente', 0)
         treinos_hoje = db.executar_query("SELECT COUNT(*) FROM checkins WHERE id_filial=%s AND data_aula=CURRENT_DATE AND validado=TRUE", (id_filial,), fetch=True)[0][0]
         
-        q_niver = "SELECT nome_completo, telefone FROM usuarios WHERE id_filial=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor') AND EXTRACT(MONTH FROM data_nascimento) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(DAY FROM data_nascimento) = EXTRACT(DAY FROM CURRENT_DATE)"
+        # --- CORREÇÃO: ANIVERSARIANTES DO MÊS INTEIRO ---
+        q_niver = """
+            SELECT nome_completo, TO_CHAR(data_nascimento, 'DD/MM') as dia, telefone 
+            FROM usuarios 
+            WHERE id_filial=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor') 
+            AND EXTRACT(MONTH FROM data_nascimento) = EXTRACT(MONTH FROM CURRENT_DATE)
+            ORDER BY EXTRACT(DAY FROM data_nascimento)
+        """
         aniversariantes = db.executar_query(q_niver, (id_filial,), fetch=True)
-        qtd_niver = len(aniversariantes) if aniversariantes else 0
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("✅ Ativos", qtd_ativos)
@@ -104,9 +126,9 @@ def painel_adm_filial(renderizar_sidebar=True):
                             db.executar_query("UPDATE usuarios SET status_conta='Inativo' WHERE id=%s", (s['id'],)); st.rerun()
             st.divider()
 
-        if qtd_niver > 0:
-            st.success(f"🎈 **{qtd_niver} Aniversariante(s) hoje!**")
-            st.dataframe(pd.DataFrame(aniversariantes, columns=['Nome', 'WhatsApp']), use_container_width=True, hide_index=True)
+        if aniversariantes:
+            st.success(f"🎈 **{len(aniversariantes)} Aniversariante(s) neste mês!**")
+            st.dataframe(pd.DataFrame(aniversariantes, columns=['Nome', 'Dia', 'WhatsApp']), use_container_width=True, hide_index=True)
             st.divider()
 
         d_faixa = db.executar_query("SELECT faixa, COUNT(*) as qtd FROM usuarios WHERE id_filial=%s AND perfil IN ('aluno', 'monitor') AND status_conta='Ativo' GROUP BY faixa", (id_filial,), fetch=True)
@@ -128,7 +150,7 @@ def painel_adm_filial(renderizar_sidebar=True):
     # =======================================================
     # 2. CHAMADA
     # =======================================================
-    with tab_chamada:
+    elif menu_selecionado == "✅ Chamada":
         pendencias = db.executar_query("SELECT c.id, u.nome_completo, t.nome as turma, t.horario FROM checkins c JOIN usuarios u ON c.id_aluno = u.id JOIN turmas t ON c.id_turma = t.id WHERE c.id_filial=%s AND c.data_aula = CURRENT_DATE AND c.validado = FALSE ORDER BY t.horario", (id_filial,), fetch=True)
         if pendencias:
             st.error(f"🔔 Existem {len(pendencias)} check-ins aguardando aprovação!")
@@ -197,7 +219,7 @@ def painel_adm_filial(renderizar_sidebar=True):
     # =======================================================
     # 3. RANKINGS (COM APROVAÇÃO DE MEDALHAS)
     # =======================================================
-    with tab_rank:
+    elif menu_selecionado == "🏆 Rankings":
         col_casca, col_comp = st.columns([1, 1])
         
         # --- CASCA GROSSA ---
@@ -292,7 +314,7 @@ def painel_adm_filial(renderizar_sidebar=True):
     # =======================================================
     # 4. GRADUAÇÃO (OTIMIZADO)
     # =======================================================
-    with tab_grad:
+    elif menu_selecionado == "🎓 Graduações":
         if eh_admin:
             pend = db.executar_query("SELECT s.id, u.nome_completo, s.nova_faixa FROM solicitacoes_graduacao s JOIN usuarios u ON s.id_aluno=u.id WHERE s.id_filial=%s AND s.status='Pendente'", (id_filial,), fetch=True)
             if pend:
@@ -357,8 +379,9 @@ def painel_adm_filial(renderizar_sidebar=True):
     # =======================================================
     # 5. TURMAS
     # =======================================================
-    with tab_turmas:
+    elif menu_selecionado == "📅 Turmas":
         sub_tab_config, sub_tab_enturmar = st.tabs(["⚙️ Criar/Editar Turmas", "👥 Gerenciar Alunos na Turma"])
+        
         with sub_tab_config:
             if 'edit_turma_id' not in st.session_state: st.session_state.edit_turma_id = None
             val_nome, val_dias, val_horario, val_id_prof, val_id_mon = "", "", "", None, None
@@ -368,6 +391,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                 val_nome = dados_t['nome']; val_dias = dados_t['dias']; val_horario = dados_t['horario']
                 val_id_prof = dados_t['id_professor']; val_id_mon = dados_t['id_monitor']
                 lbl_btn = "💾 Salvar Alterações"; expandido = True
+            
             with st.container(border=True):
                 with st.expander(f"{'✏️ Editando Turma' if st.session_state.edit_turma_id else '➕ Nova Turma'}", expanded=expandido):
                     with st.form("form_turma"):
@@ -380,11 +404,13 @@ def painel_adm_filial(renderizar_sidebar=True):
                         opts_prof = {p['nome_completo']: p['id'] for p in profs} if profs else {}
                         idx_prof = list(opts_prof.values()).index(val_id_prof) if val_id_prof in opts_prof.values() else 0
                         sel_prof = c_prof.selectbox("Professor Responsável", list(opts_prof.keys()), index=idx_prof) if opts_prof else None
+                        
                         mons = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_filial=%s AND perfil='monitor'", (id_filial,), fetch=True)
                         opts_mon = {m['nome_completo']: m['id'] for m in mons}
                         opts_mon["--- Sem Monitor ---"] = None
                         idx_mon = list(opts_mon.values()).index(val_id_mon) if val_id_mon in opts_mon.values() else list(opts_mon.keys()).index("--- Sem Monitor ---")
                         sel_mon = c_mon.selectbox("Monitor Auxiliar", list(opts_mon.keys()), index=idx_mon)
+                        
                         c_save, c_cancel = st.columns([1, 4])
                         if c_save.form_submit_button(lbl_btn, type="primary"):
                             if n and d and h and sel_prof:
@@ -399,6 +425,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                             else: st.error("Preencha campos.")
                         if st.session_state.edit_turma_id:
                             if c_cancel.form_submit_button("Cancelar"): st.session_state.edit_turma_id = None; st.rerun()
+            
             ts = db.executar_query("SELECT t.id, t.nome, t.dias, t.horario, u.nome_completo as nome_prof FROM turmas t LEFT JOIN usuarios u ON t.id_professor = u.id WHERE t.id_filial=%s ORDER BY t.nome", (id_filial,), fetch=True)
             if ts:
                 for t in ts:
@@ -414,34 +441,45 @@ def painel_adm_filial(renderizar_sidebar=True):
             turmas_g = db.executar_query("SELECT id, nome, horario FROM turmas WHERE id_filial=%s", (id_filial,), fetch=True)
             d_turmas_sel = {f"{t['nome']} ({t['horario']})": t['id'] for t in turmas_g} if turmas_g else {}
             sel_t_gestao = st.selectbox("Selecione a Turma", list(d_turmas_sel.keys()), key="sel_turma_gestao") if d_turmas_sel else None
+            
             if sel_t_gestao:
                 id_t_alvo = d_turmas_sel[sel_t_gestao]
-                col_in, col_out = st.columns(2)
+                
+                col_in, col_out = st.columns(2, gap="large") 
+                
                 with col_in:
                     st.success("✅ Alunos Nesta Turma")
                     alunos_in = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_turma=%s AND status_conta='Ativo' ORDER BY nome_completo", (id_t_alvo,), fetch=True)
                     if alunos_in:
                         for a in alunos_in:
-                            c_nome, c_btn = st.columns([0.8, 0.2])
-                            c_nome.write(f"🥋 {a['nome_completo']}")
-                            if c_btn.button("❌", key=f"rem_{a['id']}"):
-                                db.executar_query("UPDATE usuarios SET id_turma=NULL WHERE id=%s", (a['id'],)); st.toast("Removido!"); time.sleep(0.5); st.rerun()
-                    else: st.caption("Vazia.")
+                            c_nome, c_btn = st.columns([5, 1]) 
+                            c_nome.markdown(f"<div style='margin-top: 5px;'>🥋 <b>{a['nome_completo']}</b></div>", unsafe_allow_html=True)
+                            if c_btn.button("❌", key=f"rem_{a['id']}", help="Remover aluno desta turma"):
+                                db.executar_query("UPDATE usuarios SET id_turma=NULL WHERE id=%s", (a['id'],))
+                                st.toast("Removido!"); time.sleep(0.5); st.rerun()
+                            st.markdown('<hr style="margin: 0px; border: none; border-top: 1px solid #333;">', unsafe_allow_html=True)
+                    else: 
+                        st.caption("Ainda não há alunos nesta turma.")
+                        
                 with col_out:
                     st.warning("⚠️ Alunos Disponíveis")
                     alunos_out = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE (id_turma IS NULL OR id_turma != %s) AND id_filial=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor') ORDER BY nome_completo", (id_t_alvo, id_filial), fetch=True)
                     filtro = st.text_input("🔎 Buscar", placeholder="Nome...")
+                    st.write("") 
+                    
                     for a in alunos_out:
                         if filtro.lower() in a['nome_completo'].lower():
-                            c_nome, c_btn = st.columns([0.8, 0.2])
-                            c_nome.write(f"{a['nome_completo']}")
-                            if c_btn.button("➕", key=f"add_{a['id']}"):
-                                db.executar_query("UPDATE usuarios SET id_turma=%s WHERE id=%s", (id_t_alvo, a['id'])); st.toast("Adicionado!"); time.sleep(0.5); st.rerun()
+                            c_nome, c_btn = st.columns([5, 1])
+                            c_nome.markdown(f"<div style='margin-top: 5px;'>👤 {a['nome_completo']}</div>", unsafe_allow_html=True)
+                            if c_btn.button("➕", key=f"add_{a['id']}", help="Matricular nesta turma"):
+                                db.executar_query("UPDATE usuarios SET id_turma=%s WHERE id=%s", (id_t_alvo, a['id']))
+                                st.toast("Adicionado!"); time.sleep(0.5); st.rerun()
+                            st.markdown('<hr style="margin: 0px; border: none; border-top: 1px solid #333;">', unsafe_allow_html=True)
 
     # =======================================================
     # 6. ALUNOS
     # =======================================================
-    with tab_alunos:
+    elif menu_selecionado == "👥 Alunos":
         if 'aluno_edit_id' not in st.session_state: st.session_state.aluno_edit_id = None
         if 'aluno_promo_id' not in st.session_state: st.session_state.aluno_promo_id = None
 

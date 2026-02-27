@@ -10,16 +10,25 @@ import views.admin as admin_view
 
 def painel_lider():
     user = st.session_state.usuario
+    perfil = user.get('perfil', 'lider')
     
-    # --- SIDEBAR ---
-    foto_url = user.get('foto_perfil') if user.get('foto_perfil') else "logoser.jpg"
-    try: st.sidebar.image(foto_url, width=150)
-    except: st.sidebar.image("logoser.jpg", width=150)
+    # =======================================================
+    # --- SIDEBAR PADRONIZADA ---
+    # =======================================================
     
-    st.sidebar.title("Painel Mestre 👑")
+    try: 
+        st.sidebar.image("logoser.jpg", width=150)
+    except: 
+        pass
+
+    st.sidebar.markdown("## Painel Mestre 👑")
     st.sidebar.caption(f"Olá, {user['nome_completo']}")
+    cargo_texto = utils.CARGOS.get(perfil, perfil).upper() if 'perfil' in user else 'LÍDER / MESTRE'
+    st.sidebar.caption(f"🛡️ {cargo_texto}")
+    
     st.sidebar.markdown("---")
     
+    # --- MODO DE VISÃO ---
     st.sidebar.markdown("### 🔭 Modo de Visão")
     modo_visao = st.sidebar.radio(
         "Contexto:",
@@ -28,9 +37,11 @@ def painel_lider():
     )
     
     st.sidebar.markdown("---")
-    c1, c2 = st.sidebar.columns(2)
-    if c1.button("Sair"): st.session_state.logado = False; st.rerun()
-    if c2.button("⏪"): st.session_state.sidebar_state = 'collapsed'; st.rerun()
+    
+    # --- BOTÃO DE SAÍDA ---
+    if st.sidebar.button("Sair", use_container_width=True): 
+        st.session_state.logado = False
+        st.rerun()
 
     # =======================================================
     # CONTEXTO 1: GESTÃO DA REDE (CEO / ESTRATÉGICO)
@@ -38,22 +49,24 @@ def painel_lider():
     if modo_visao == "🌍 Rede & Estratégia":
         st.title("🌍 Painel Estratégico da Rede")
         
-        tab_dash, tab_alunos_global, tab_homolog, tab_filiais, tab_avisos = st.tabs([
-            "📊 Dashboard", "👥 Alunos Global", "🎓 Homologação", "🏢 Gestão de Filiais", "📢 Avisos"
-        ])
+        # --- MENU HORIZONTAL DE ALTA PERFORMANCE ---
+        menu_estrategia = st.radio(
+            "Navegação Estratégica",
+            ["📊 Dashboard", "👥 Alunos Global", "🎓 Homologação", "🏢 Gestão de Filiais", "📢 Avisos"],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        st.divider()
 
         # 1. DASHBOARD GLOBAL
-        with tab_dash:
-            # Consultas de Totais - Alunos
-            total_alunos = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Ativo' AND perfil='aluno'", fetch=True)[0][0]
-            total_inativos = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Inativo' AND perfil='aluno'", fetch=True)[0][0]
+        if menu_estrategia == "📊 Dashboard":
+            total_alunos = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Ativo' AND perfil IN ('aluno', 'monitor')", fetch=True)[0][0]
+            total_inativos = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Inativo' AND perfil IN ('aluno', 'monitor')", fetch=True)[0][0]
             
-            # Consultas de Totais - Filiais e Homologação
             total_filiais = db.executar_query("SELECT COUNT(*) FROM filiais", fetch=True)[0][0]
             pendencias = db.executar_query("SELECT COUNT(*) FROM solicitacoes_graduacao WHERE status='Aguardando Homologacao'", fetch=True)[0][0]
             
-            # Consultas de Totais - EQUIPE DETALHADA
-            total_equipe = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Ativo' AND perfil IN ('professor', 'lider', 'monitor', 'adm_filial')", fetch=True)[0][0]
+            total_membros = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Ativo'", fetch=True)[0][0]
             total_profs = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Ativo' AND perfil IN ('professor', 'lider')", fetch=True)[0][0]
             total_monitores = db.executar_query("SELECT COUNT(*) FROM usuarios WHERE status_conta='Ativo' AND perfil='monitor'", fetch=True)[0][0]
             
@@ -68,7 +81,6 @@ def painel_lider():
             aniversariantes = db.executar_query(q_niver, fetch=True)
             qtd_niver = len(aniversariantes) if aniversariantes else 0
 
-            # --- KPIs REORGANIZADOS EM 2 BLOCOS ---
             st.markdown("##### 👥 Alunos e Operação")
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Alunos Ativos", total_alunos)
@@ -83,7 +95,7 @@ def painel_lider():
             st.markdown("##### 🛡️ Estrutura e Equipe")
             e1, e2, e3, e4 = st.columns(4)
             e1.metric("🏢 Filiais", total_filiais)
-            e2.metric("Total da Equipe", total_equipe)
+            e2.metric("Total de Membros", total_membros)
             e3.metric("🥋 Professores", total_profs)
             e4.metric("🤝 Monitores", total_monitores)
 
@@ -93,13 +105,12 @@ def painel_lider():
                 with st.expander(f"🎈 Ver Aniversariantes ({qtd_niver})"):
                     st.dataframe(pd.DataFrame(aniversariantes, columns=['Nome', 'Filial', 'WhatsApp']), use_container_width=True, hide_index=True)
                         
-            # --- GRÁFICOS ESTATÍSTICOS ---
             c_pizza, c_barras = st.columns([1, 1.5])
             cores_map = {'Branca': '#f0f0f0', 'Cinza': '#a0a0a0', 'Amarela': '#ffe135', 'Laranja': '#ff8c00', 'Verde': '#228b22', 'Azul': '#0000ff', 'Roxa': '#800080', 'Marrom': '#8b4513', 'Preta': '#000000'}
 
             with c_pizza:
                 st.markdown("##### 🥋 Por Faixa")
-                d_rede = db.executar_query("SELECT faixa, COUNT(*) as qtd FROM usuarios WHERE perfil='aluno' AND status_conta='Ativo' GROUP BY faixa", fetch=True)
+                d_rede = db.executar_query("SELECT faixa, COUNT(*) as qtd FROM usuarios WHERE perfil IN ('aluno', 'monitor') AND status_conta='Ativo' GROUP BY faixa", fetch=True)
                 if d_rede: 
                     fig = px.pie(pd.DataFrame(d_rede, columns=['Faixa', 'Qtd']), values='Qtd', names='Faixa', hole=0.4, color='Faixa', color_discrete_map=cores_map)
                     fig.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
@@ -112,7 +123,7 @@ def painel_lider():
                     FROM filiais f 
                     LEFT JOIN usuarios u ON f.id = u.id_filial 
                     AND u.status_conta='Ativo' 
-                    AND u.perfil='aluno' 
+                    AND u.perfil IN ('aluno', 'monitor') 
                     GROUP BY f.nome 
                     ORDER BY qtd DESC
                 """, fetch=True)
@@ -124,7 +135,6 @@ def painel_lider():
 
             st.divider()
 
-            # --- RANKINGS ---
             c_rank_freq, c_rank_comp = st.columns(2)
             with c_rank_freq:
                 st.markdown("##### 🦍 Casca Grossa (Frequência)")
@@ -163,7 +173,7 @@ def painel_lider():
                 else: st.info("Sem medalhas.")
 
         # 2. ALUNOS GLOBAL
-        with tab_alunos_global:
+        elif menu_estrategia == "👥 Alunos Global":
             if 'lider_edit_aluno_id' not in st.session_state: st.session_state.lider_edit_aluno_id = None
             
             with st.expander("➕ Matricular Novo Aluno na Rede"):
@@ -259,7 +269,7 @@ def painel_lider():
                     SELECT u.id, u.nome_completo, u.faixa, f.nome as nome_filial 
                     FROM usuarios u 
                     LEFT JOIN filiais f ON u.id_filial = f.id 
-                    WHERE u.perfil='aluno' AND u.status_conta='Ativo'
+                    WHERE u.perfil IN ('aluno', 'monitor') AND u.status_conta='Ativo'
                 """
                 params = []
                 if filtro_nome:
@@ -288,7 +298,7 @@ def painel_lider():
                 else: st.info("Nenhum aluno encontrado.")
 
         # 3. HOMOLOGAÇÃO
-        with tab_homolog:
+        elif menu_estrategia == "🎓 Homologação":
             st.markdown("#### Assinatura de Faixas")
             pendentes = db.executar_query("""
                 SELECT s.id, u.nome_completo, f.nome as filial, s.faixa_atual, s.nova_faixa, s.id_aluno 
@@ -310,9 +320,8 @@ def painel_lider():
             else: st.success("Tudo em dia!")
 
         # 4. GESTÃO DE FILIAIS
-        with tab_filiais:
+        elif menu_estrategia == "🏢 Gestão de Filiais":
             
-            # --- CADASTRO (Expander fechado por padrão) ---
             with st.expander("➕ Criar Nova Filial", expanded=False):
                 if 'novo_logradouro' not in st.session_state: st.session_state.novo_logradouro = ""
                 if 'novo_bairro' not in st.session_state: st.session_state.novo_bairro = ""
@@ -367,12 +376,10 @@ def painel_lider():
 
             st.divider()
             
-            # --- LISTA DE FILIAIS ---
             st.markdown("#### 🏢 Filiais Ativas")
             filiais = db.executar_query("SELECT * FROM filiais ORDER BY nome", fetch=True)
             
             if filiais:
-                # LISTA 1: Para escolher o Responsável (Só Liderança)
                 usuarios_lideranca = db.executar_query("""
                     SELECT id, nome_completo 
                     FROM usuarios 
@@ -382,7 +389,6 @@ def painel_lider():
                 """, fetch=True)
                 lista_resp_nomes = [u['nome_completo'] for u in usuarios_lideranca] if usuarios_lideranca else []
 
-                # LISTA 2: Para promover a Admin (Qualquer pessoa, ex: Aluno)
                 todos_usuarios = db.executar_query("""
                     SELECT id, nome_completo, perfil 
                     FROM usuarios 
@@ -397,7 +403,6 @@ def painel_lider():
                     with st.expander(f"📍 {f['nome']} ({len(admins_da_filial)} Admins)"):
                         col_dados, col_admins = st.columns(2)
                         
-                        # COLUNA DA ESQUERDA: DADOS DA FILIAL
                         with col_dados:
                             st.markdown("##### 📝 Dados da Unidade")
                             idx_resp = 0
@@ -429,7 +434,6 @@ def painel_lider():
                                     time.sleep(1)
                                     st.rerun()
 
-                        # COLUNA DA DIREITA: ADMINS
                         with col_admins:
                             st.markdown("##### 👮 Admins")
                             if admins_da_filial:
@@ -447,7 +451,6 @@ def painel_lider():
                                 st.write(f"Gerenciar Admin: **{f['nome']}**")
                                 tab_novo, tab_existente = st.tabs(["🆕 Cadastrar Externo", "🔄 Vincular Existente"])
                                 
-                                # ABA 1: CADASTRAR DO ZERO (EXTERNO)
                                 with tab_novo:
                                     with st.form(f"new_adm_{f['id']}"):
                                         na_nome = st.text_input("Nome")
@@ -460,7 +463,6 @@ def painel_lider():
                                                 else: st.success("Criado!"); time.sleep(1); st.rerun()
                                             else: st.error("Preencha tudo.")
                                 
-                                # ABA 2: PROMOVER ALGUÉM QUE JÁ EXISTE
                                 with tab_existente:
                                     if mapa_todos_usuarios:
                                         sel_usuario_promover = st.selectbox("Selecione o Usuário", list(mapa_todos_usuarios.keys()), key=f"sel_prom_{f['id']}")
@@ -472,7 +474,7 @@ def painel_lider():
                                         st.warning("Nenhum usuário disponível.")
 
         # 5. AVISOS
-        with tab_avisos:
+        elif menu_estrategia == "📢 Avisos":
             st.markdown("### 📢 Central de Comunicação")
             MODELOS = {
                 "--- Selecione ---": "",
