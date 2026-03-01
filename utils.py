@@ -2,16 +2,18 @@ import streamlit as st
 import requests
 from datetime import date
 
-# --- CONSTANTES ---
-ORDEM_FAIXAS = [
-    # --- KIDS (4 a 15 Anos) ---
+# --- CONSTANTES DE FAIXAS SEPARADAS ---
+
+FAIXAS_KIDS = [
     'Branca',                 
     'Cinza/Branca', 'Cinza', 'Cinza/Preta',       
     'Amarela/Branca', 'Amarela', 'Amarela/Preta', 
     'Laranja/Branca', 'Laranja', 'Laranja/Preta', 
-    'Verde/Branca', 'Verde', 'Verde/Preta',       
-    
-    # --- JUVENIL / ADULTO (16+ Anos) ---
+    'Verde/Branca', 'Verde', 'Verde/Preta'
+]
+
+FAIXAS_ADULTO = [
+    'Branca', # Adultos também começam na branca
     'Azul',
     'Roxa',
     'Marrom',
@@ -20,6 +22,9 @@ ORDEM_FAIXAS = [
     'Coral (Vermelha/Branca)',
     'Vermelha'
 ]
+
+# Mantemos a ORDEM_FAIXAS unificada (sem duplicar a Branca) para os menus dropdown não quebrarem nos outros arquivos
+ORDEM_FAIXAS = list(dict.fromkeys(FAIXAS_KIDS + FAIXAS_ADULTO))
 
 CARGOS = {
     "aluno": "Aluno",
@@ -32,7 +37,7 @@ CARGOS = {
 # --- FUNÇÕES AUXILIARES ---
 
 def calcular_idade_ano(data_nascimento):
-    """Retorna a idade que o aluno completa no ano atual"""
+    """Retorna a idade que o aluno completa no ano atual (Regra IBJJF)"""
     if not data_nascimento: return 0
     return date.today().year - data_nascimento.year
 
@@ -43,29 +48,28 @@ def get_proxima_faixa(faixa_atual, idade=0):
     """
     # 1. Regras de Pulo para Adultos (16+)
     if idade >= 16:
-        # Se for Branca Adulto -> Vai para Azul
-        if faixa_atual == 'Branca':
+        # Se for Branca ou qualquer faixa infantil, a próxima de cor é Azul
+        if faixa_atual in FAIXAS_KIDS:
             return 'Azul'
         
-        # Se for Juvenil (faixa de criança) -> Vai para Azul
-        faixas_kids = [
-            'Cinza/Branca', 'Cinza', 'Cinza/Preta',
-            'Amarela/Branca', 'Amarela', 'Amarela/Preta',
-            'Laranja/Branca', 'Laranja', 'Laranja/Preta',
-            'Verde/Branca', 'Verde', 'Verde/Preta'
-        ]
-        if faixa_atual in faixas_kids:
-            return 'Azul'
+        # Se já for adulto graduado, segue a lista de adultos
+        if faixa_atual in FAIXAS_ADULTO:
+            idx = FAIXAS_ADULTO.index(faixa_atual)
+            if idx + 1 < len(FAIXAS_ADULTO):
+                return FAIXAS_ADULTO[idx + 1]
+        
+        return "Grau Máximo"
 
-    # 2. Sequência Padrão (Kids ou Adulto seguindo a ordem)
-    try:
-        idx = ORDEM_FAIXAS.index(faixa_atual)
-        if idx + 1 < len(ORDEM_FAIXAS):
-            return ORDEM_FAIXAS[idx + 1]
-    except:
-        pass
-    return "Grau Máximo"
+    # 2. Sequência Kids (< 16 Anos)
+    else:
+        if faixa_atual in FAIXAS_KIDS:
+            idx = FAIXAS_KIDS.index(faixa_atual)
+            if idx + 1 < len(FAIXAS_KIDS):
+                return FAIXAS_KIDS[idx + 1]
+            else:
+                return "Aguardando 16 anos (Azul)" # Chegou no limite da Verde/Preta
 
+        return "Faixa Inválida para Idade"
 
 # --- LÓGICA DE GRADUAÇÃO ---
 def calcular_status_graduacao(aluno, total_presencas=0):
@@ -81,39 +85,31 @@ def calcular_status_graduacao(aluno, total_presencas=0):
     is_troca_faixa = False # True = Muda cor | False = Ganha grau
     regra_aplicada = "Adulto"
     
-    # Usamos a nova função inteligente para saber o nome do próximo passo
-    # Se for troca de faixa, pegamos a próxima cor correta
-    # Se for grau, o nome é calculado abaixo
+    # Descobre o nome da próxima faixa de cor
     proxima_cor = get_proxima_faixa(faixa, idade_ano) 
 
-    # 1. LISTA DE FAIXAS KIDS COLORIDAS
-    faixas_kids_coloridas = [
-        'Cinza/Branca', 'Cinza', 'Cinza/Preta',
-        'Amarela/Branca', 'Amarela', 'Amarela/Preta',
-        'Laranja/Branca', 'Laranja', 'Laranja/Preta',
-        'Verde/Branca', 'Verde', 'Verde/Preta'
-    ]
-
-    # A. JUVENIL (16 ANOS)
-    if idade_ano >= 16 and faixa in faixas_kids_coloridas:
+    # A. TRANSIÇÃO JUVENIL (Fazendo 16 anos com faixa de criança)
+    if idade_ano >= 16 and faixa in FAIXAS_KIDS and faixa != 'Branca':
         return True, "Juvenil (16 anos): Apto para Faixa Azul!", 1.0, True
 
     # B. KIDS (< 16 ANOS)
     if idade_ano < 16:
         regra_aplicada = "Kids"
-        is_troca_faixa = True 
+        is_troca_faixa = True # Kids mudam de cor com mais frequência na sua lógica
         
         if faixa in ['Branca', 'Cinza/Branca']:
             meses_necessarios = 6
-        elif faixa in faixas_kids_coloridas:
+        elif faixa in FAIXAS_KIDS:
             meses_necessarios = 12
-            # Barreiras de Idade
+            # Barreiras de Idade IBJJF
             if 'Amarela' in proxima_cor and idade_ano < 7:
                 return False, f"Aguardando idade (7 anos) para Amarela", 0.0, True
             if 'Laranja' in proxima_cor and idade_ano < 10:
                 return False, f"Aguardando idade (10 anos) para Laranja", 0.0, True
             if 'Verde' in proxima_cor and idade_ano < 13:
                 return False, f"Aguardando idade (13 anos) para Verde", 0.0, True
+            if 'Azul' in proxima_cor:
+                return False, f"Aguardando 16 anos para Faixa Azul", 1.0, True
 
     # C. ADULTO (>= 16 ANOS)
     else:

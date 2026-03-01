@@ -135,15 +135,25 @@ def painel_lider():
 
             st.divider()
 
+            # --- RANKINGS COM FILTRO DE CATEGORIA NO DASHBOARD GLOBAL ---
+            st.markdown("##### 🏆 Rankings da Rede")
+            categoria_dash = st.radio("Selecione a Categoria:", ["🥋 Adultos (16+)", "🧒 Kids (até 15)"], horizontal=True, key="cat_dash_global")
+            
+            if categoria_dash == "🥋 Adultos (16+)":
+                filtro_idade_sql = "AND EXTRACT(YEAR FROM age(CURRENT_DATE, u.data_nascimento)) >= 16"
+            else:
+                filtro_idade_sql = "AND EXTRACT(YEAR FROM age(CURRENT_DATE, u.data_nascimento)) < 16"
+
             c_rank_freq, c_rank_comp = st.columns(2)
             with c_rank_freq:
-                st.markdown("##### 🦍 Casca Grossa (Frequência)")
-                sql_freq_global = """
+                st.markdown(f"###### 🦍 Casca Grossa (Frequência) - {categoria_dash.split(' ')[1]}")
+                sql_freq_global = f"""
                     SELECT u.nome_completo, f.nome as filial, COUNT(c.id) as treinos
                     FROM checkins c
                     JOIN usuarios u ON c.id_aluno = u.id
                     JOIN filiais f ON c.id_filial = f.id
                     WHERE c.validado=TRUE AND EXTRACT(YEAR FROM c.data_aula) = %s
+                    {filtro_idade_sql}
                     GROUP BY u.nome_completo, f.nome
                     ORDER BY treinos DESC LIMIT 5
                 """
@@ -155,13 +165,14 @@ def painel_lider():
                 else: st.info("Sem dados.")
 
             with c_rank_comp:
-                st.markdown("##### ⚔️ Top Competidores")
-                sql_comp_global = """
+                st.markdown(f"###### ⚔️ Top Competidores - {categoria_dash.split(' ')[1]}")
+                sql_comp_global = f"""
                     SELECT u.nome_completo, f.nome as filial, SUM(hc.pontos) as pontos
                     FROM historico_competicoes hc
                     JOIN usuarios u ON hc.id_aluno = u.id
                     JOIN filiais f ON hc.id_filial = f.id
                     WHERE hc.status='Aprovado' AND EXTRACT(YEAR FROM hc.data_competicao) = %s
+                    {filtro_idade_sql}
                     GROUP BY u.nome_completo, f.nome
                     ORDER BY pontos DESC LIMIT 5
                 """
@@ -260,9 +271,14 @@ def painel_lider():
             else:
                 c_top1, c_top2 = st.columns([3, 1])
                 filtro_nome = c_top1.text_input("🔎 Buscar", placeholder="Nome...")
-                opts_filial_filtro = {"Todas": None}
+                
+                # --- FILTRO DE CATEGORIA NA LISTA GLOBAL ---
+                c_filtro_cat, c_filtro_fil = st.columns(2)
+                filtro_idade_lista = c_filtro_cat.radio("Categoria:", ["Todas", "Adultos (16+)", "Kids (<16)"], horizontal=True)
+                
+                opts_filial_filtro = {"Todas as Filiais": None}
                 opts_filial_filtro.update(opts_filial_reg)
-                filtro_filial_nome = c_top2.selectbox("Filtrar", list(opts_filial_filtro.keys()))
+                filtro_filial_nome = c_filtro_fil.selectbox("Filtrar por Filial", list(opts_filial_filtro.keys()))
                 id_filial_filtro = opts_filial_filtro[filtro_filial_nome]
 
                 query_base = """
@@ -272,6 +288,12 @@ def painel_lider():
                     WHERE u.perfil IN ('aluno', 'monitor') AND u.status_conta='Ativo'
                 """
                 params = []
+                
+                if filtro_idade_lista == "Adultos (16+)":
+                    query_base += " AND EXTRACT(YEAR FROM age(CURRENT_DATE, u.data_nascimento)) >= 16"
+                elif filtro_idade_lista == "Kids (<16)":
+                    query_base += " AND EXTRACT(YEAR FROM age(CURRENT_DATE, u.data_nascimento)) < 16"
+                
                 if filtro_nome:
                     query_base += " AND u.nome_completo ILIKE %s"
                     params.append(f"%{filtro_nome}%")
