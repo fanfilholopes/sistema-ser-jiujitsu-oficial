@@ -388,7 +388,7 @@ def painel_adm_filial(renderizar_sidebar=True):
         else: st.info("Nenhum aluno nesta categoria.")
 
     # =======================================================
-    # 5. TURMAS (RESTAURADO COM CAMPOS COMPLETOS + 2 COLUNAS)
+    # 5. TURMAS (VERSÃO FINAL: PROF/MONITOR + QTD ALUNOS + 2 COLUNAS)
     # =======================================================
     elif menu_selecionado == "📅 Turmas":
         sub_tab_config, sub_tab_enturmar = st.tabs(["⚙️ Criar/Editar Turmas", "👥 Gerenciar Alunos na Turma"])
@@ -438,17 +438,33 @@ def painel_adm_filial(renderizar_sidebar=True):
                                 else:
                                     db.executar_query("INSERT INTO turmas (nome, dias, horario, id_professor, id_monitor, id_filial) VALUES (%s, %s, %s, %s, %s, %s)", (n, d, h, id_p_sel, id_m_sel, id_filial))
                                     st.success("Criado!"); st.rerun()
-                            else: st.error("Preencha os campos obrigatórios (Nome, Dias, Horário e Professor).")
+                            else: st.error("Preencha os campos obrigatórios.")
                         
                         if st.session_state.edit_turma_id:
                             if c_cancel.form_submit_button("Cancelar"): 
                                 st.session_state.edit_turma_id = None; st.rerun()
             
-            # Listagem das turmas existentes para editar/excluir
-            ts = db.executar_query("SELECT t.id, t.nome, t.dias, t.horario, u.nome_completo as nome_prof FROM turmas t LEFT JOIN usuarios u ON t.id_professor = u.id WHERE t.id_filial=%s ORDER BY t.nome", (id_filial,), fetch=True)
+            # --- LISTAGEM DAS TURMAS COM JOIN PARA PROF/MONITOR + CONTAGEM DE ALUNOS ---
+            sql_ts = """
+                SELECT 
+                    t.id, t.nome, t.dias, t.horario, 
+                    u1.nome_completo as nome_prof, 
+                    u2.nome_completo as nome_mon,
+                    (SELECT COUNT(*) FROM usuarios WHERE id_turma = t.id AND status_conta = 'Ativo') as qtd_alunos
+                FROM turmas t 
+                LEFT JOIN usuarios u1 ON t.id_professor = u1.id 
+                LEFT JOIN usuarios u2 ON t.id_monitor = u2.id 
+                WHERE t.id_filial=%s 
+                ORDER BY t.nome
+            """
+            ts = db.executar_query(sql_ts, (id_filial,), fetch=True)
+            
             if ts:
                 for t in ts:
-                    with st.expander(f"🥋 {t['nome']} - {t['horario']} | Prof. {t['nome_prof'] or 'Não definido'}"):
+                    txt_monitor = f" | Mon. {t['nome_mon']}" if t['nome_mon'] else ""
+                    txt_qtd = f" ({t['qtd_alunos']} Alunos)"
+                    
+                    with st.expander(f"🥋 {t['nome']} - {t['horario']}{txt_qtd} | Prof. {t['nome_prof'] or 'Não definido'}{txt_monitor}"):
                         c1, c2 = st.columns(2)
                         if c1.button("✏️ Editar", key=f"et_{t['id']}", use_container_width=True): 
                             st.session_state.edit_turma_id = t['id']; st.rerun()
@@ -459,7 +475,7 @@ def painel_adm_filial(renderizar_sidebar=True):
             st.markdown("##### Gestão de Elenco")
             turmas_g = db.executar_query("SELECT id, nome, horario FROM turmas WHERE id_filial=%s", (id_filial,), fetch=True)
             d_turmas_sel = {f"{t['nome']} ({t['horario']})": t['id'] for t in turmas_g} if turmas_g else {}
-            sel_t_gestao = st.selectbox("Selecione a Turma para gerenciar alunos", list(d_turmas_sel.keys()), key="sel_turma_gestao") if d_turmas_sel else None
+            sel_t_gestao = st.selectbox("Selecione a Turma para gerenciar alunos", list(d_turmas_sel.keys()), key="sel_turma_gestao")
             
             if sel_t_gestao:
                 id_t_alvo = d_turmas_sel[sel_t_gestao]
@@ -487,6 +503,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                                     db.executar_query("UPDATE usuarios SET id_turma=%s WHERE id=%s", (id_t_alvo, a['id'])); st.rerun()
                     else: st.caption("Todos os alunos ativos já estão em turmas.")
 
+                    
     # =======================================================
     # 6. ALUNOS (CORREÇÃO 4: 3 COLUNAS + FORMULÁRIO NOVO VOLTOU)
     # =======================================================
@@ -558,7 +575,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                                 else:
                                     if b3.button("♻️", key=f"re_{m['id']}"):
                                         db.executar_query("UPDATE usuarios SET status_conta='Ativo' WHERE id=%s", (m['id'],)); st.rerun()
-                                        
+
             with tab_n:
                 st.subheader("Nova Matrícula")
                 
