@@ -529,19 +529,26 @@ def painel_adm_filial(renderizar_sidebar=True):
                 filtro_cat = cf2.radio("Categoria:", ["Adultos", "Kids", "Todos"], horizontal=True)
                 st_filtro = "Ativo" if filtro_status == "Ativos" else "Inativo"
                 
-                sql = "SELECT id, nome_completo, faixa, perfil FROM usuarios WHERE id_filial=%s AND status_conta=%s AND perfil IN ('aluno', 'monitor')"
+                # --- CORREÇÃO AQUI: ADICIONADO 'graus' NO SELECT ---
+                sql = "SELECT id, nome_completo, faixa, perfil, graus FROM usuarios WHERE id_filial=%s AND status_conta=%s AND perfil IN ('aluno', 'monitor')"
+                
                 if filtro_cat == "Adultos": sql += " AND EXTRACT(YEAR FROM age(CURRENT_DATE, data_nascimento)) >= 16"
                 elif filtro_cat == "Kids": sql += " AND EXTRACT(YEAR FROM age(CURRENT_DATE, data_nascimento)) < 16"
                 
                 membros = db.executar_query(sql + " ORDER BY nome_completo", (id_filial, st_filtro), fetch=True)
+                
                 if membros:
-                    cols = st.columns(3) # --- ALTERADO PARA 3 COLUNAS ---
+                    cols = st.columns(3)
                     for i, m in enumerate(membros):
                         with cols[i % 3]:
                             with st.container(border=True):
-                                icon = "🧢" if m['perfil'] == 'monitor' else "🥋"
+                                icon = "Cap" if m['perfil'] == 'monitor' else "🥋"
                                 st.markdown(f"**{icon} {m['nome_completo']}**")
-                                st.caption(f"Faixa: {m['faixa']}")
+                                
+                                # --- MOSTRANDO FAIXA E GRAU ---
+                                txt_grau = f" ({m['graus']}º Grau)" if m['graus'] and m['graus'] > 0 else ""
+                                st.caption(f"Faixa: {m['faixa']}{txt_grau}")
+                                
                                 b1, b2, b3 = st.columns(3)
                                 if b1.button("✏️", key=f"ed_{m['id']}"): st.session_state.aluno_edit_id = m['id']; st.rerun()
                                 if st_filtro == 'Ativo':
@@ -551,7 +558,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                                 else:
                                     if b3.button("♻️", key=f"re_{m['id']}"):
                                         db.executar_query("UPDATE usuarios SET status_conta='Ativo' WHERE id=%s", (m['id'],)); st.rerun()
-
+                                        
             with tab_n:
                 st.subheader("Nova Matrícula")
                 
