@@ -8,7 +8,7 @@ import os
 
 def painel_professor():
     user = st.session_state.usuario
-    id_filial = user['id_filial']
+    id_filial_origem = user['id_filial']
     id_prof = user['id']
     perfil = user.get('perfil', 'professor')
 
@@ -56,7 +56,7 @@ def painel_professor():
 
     st.sidebar.markdown("---")
     
-    if st.sidebar.button("Sair"):
+    if st.sidebar.button("Sair", use_container_width=True):
         st.session_state.logado = False
         st.rerun()
 
@@ -75,37 +75,40 @@ def painel_professor():
     # 1. VALIDAÇÃO DE CHECK-INS (O ACEITE)
     st.subheader("🔔 Check-ins Pendentes de Aceite")
     
-    # Busca check-ins de HOJE que ainda NÃO foram validados (validado=FALSE)
-    # Filtra apenas turmas deste professor (ou todas da filial se for admin vendo)
-    pendencias = db.executar_query("""
-        SELECT c.id, u.nome_completo, t.nome as turma, t.horario 
+    # --- MUDANÇA PARA PROFESSOR VIAJANTE ---
+    # Agora buscamos check-ins onde:
+    # A) A turma pertence à filial de origem do professor
+    # B) OU o professor é o responsável direto pela turma (mesmo em outra filial)
+    sql_pendencias = """
+        SELECT c.id, u.nome_completo, t.nome as turma, t.horario, f.nome as nome_filial
         FROM checkins c
         JOIN usuarios u ON c.id_aluno = u.id
         JOIN turmas t ON c.id_turma = t.id
-        WHERE c.id_filial=%s 
-        AND c.data_aula = CURRENT_DATE 
+        JOIN filiais f ON c.id_filial = f.id
+        WHERE c.data_aula = CURRENT_DATE 
         AND c.validado = FALSE
-        AND (t.id_professor = %s OR %s IS NULL) -- Mostra turmas do prof ou todas se ele não tiver turma
+        AND (t.id_professor = %s OR c.id_filial = %s)
         ORDER BY t.horario
-    """, (id_filial, id_prof, None), fetch=True) 
-    # Obs: Ajustada a query para ser generosa. Se quiser restringir só às turmas DELE, tire o "OR %s IS NULL".
+    """
+    pendencias = db.executar_query(sql_pendencias, (id_prof, id_filial_origem), fetch=True)
 
     if pendencias:
         st.info(f"Você tem {len(pendencias)} alunos aguardando liberação para o treino.")
         
-        # Cria uma "mesa de aprovação"
         for p in pendencias:
             with st.container(border=True):
-                c_info, c_btn = st.columns([3, 1])
+                c_info, c_btn = st.columns([3, 1.2])
                 c_info.markdown(f"**{p['nome_completo']}**")
-                c_info.caption(f"Turma: {p['turma']} às {p['horario']}")
+                # Mostra a filial caso seja uma aula fora da sede
+                txt_local = f" | 🏢 {p['nome_filial']}" if p['nome_filial'] else ""
+                c_info.caption(f"Turma: {p['turma']} às {p['horario']}{txt_local}")
                 
                 col_ok, col_no = c_btn.columns(2)
-                if col_ok.button("✅", key=f"ok_{p['id']}", help="Aceitar Presença"):
+                if col_ok.button("✅", key=f"ok_{p['id']}", help="Aceitar Presença", use_container_width=True):
                     db.executar_query("UPDATE checkins SET validado=TRUE WHERE id=%s", (p['id'],))
                     st.toast(f"{p['nome_completo']} confirmado!"); time.sleep(0.5); st.rerun()
                 
-                if col_no.button("❌", key=f"no_{p['id']}", help="Recusar (Aluno não veio)"):
+                if col_no.button("❌", key=f"no_{p['id']}", help="Recusar", use_container_width=True):
                     db.executar_query("DELETE FROM checkins WHERE id=%s", (p['id'],))
                     st.toast("Check-in recusado."); time.sleep(0.5); st.rerun()
     else:
@@ -113,19 +116,24 @@ def painel_professor():
 
     st.divider()
 
-    # 2. LISTA DE PRESENÇA JÁ VALIDADA (Só para conferência)
+    # 2. LISTA DE PRESENÇA JÁ VALIDADA
     st.subheader("✅ Confirmados no Tatame Hoje")
-    confirmados = db.executar_query("""
-        SELECT u.nome_completo, t.nome as turma, u.faixa 
+    
+    sql_confirmados = """
+        SELECT u.nome_completo, t.nome as turma, u.faixa, f.nome as nome_filial
         FROM checkins c
         JOIN usuarios u ON c.id_aluno = u.id
         JOIN turmas t ON c.id_turma = t.id
-        WHERE c.id_filial=%s AND c.data_aula = CURRENT_DATE AND c.validado = TRUE
+        JOIN filiais f ON c.id_filial = f.id
+        WHERE c.data_aula = CURRENT_DATE 
+        AND c.validado = TRUE
+        AND (t.id_professor = %s OR c.id_filial = %s)
         ORDER BY t.horario DESC
-    """, (id_filial,), fetch=True)
+    """
+    confirmados = db.executar_query(sql_confirmados, (id_prof, id_filial_origem), fetch=True)
     
     if confirmados:
         for c in confirmados:
-            st.markdown(f"- **{c['nome_completo']}** ({c['faixa']}) <span style='color:grey'>| {c['turma']}</span>", unsafe_allow_html=True)
+            st.markdown(f"- **{c['nome_completo']}** ({c['faixa']}) <span style='color:grey'>| {c['turma']} ({c['nome_filial']})</span>", unsafe_allow_html=True)
     else:
         st.caption("Nenhum aluno confirmado ainda.")
