@@ -1,3 +1,4 @@
+# views/login.py
 import streamlit as st
 import database as db
 import utils
@@ -5,146 +6,158 @@ import time
 from datetime import date
 
 def mostrar_login():
-    # --- LAYOUT: CRIAÇÃO DA COLUNA CENTRAL ---
-    # Usamos [1, 0.8, 1] para deixar o meio mais estreito (tipo mobile)
-    # Isso força o formulário a ficar "magrinho" no centro da tela
-    col_esq, col_centro, col_dir = st.columns([1, 0.8, 1])
+    # --- LAYOUT: COLUNA CENTRAL LARGA PARA O CADASTRO ---
+    col_esq, col_centro, col_dir = st.columns([0.2, 2, 0.2])
 
-    # TUDO acontece dentro desta coluna do meio
     with col_centro:
-        
         # 1. LOGO E TÍTULO
-        c_logo_esq, c_logo_centro, c_logo_dir = st.columns([1, 2, 1])
+        c_logo_esq, c_logo_centro, c_logo_dir = st.columns([1.5, 1, 1.5])
         with c_logo_centro:
-            try: st.image("logoser.jpg", use_container_width=True)
-            except: st.markdown("<h2 style='text-align: center;'>🥋 SER</h2>", unsafe_allow_html=True)
+            try: 
+                st.image("logoser.jpg", use_container_width=True)
+            except: 
+                st.markdown("<h2 style='text-align: center;'>🥋 SER</h2>", unsafe_allow_html=True)
         
-        st.write("") # Espaço extra
+        st.write("") 
         
-        # 2. ABAS (Agora dentro da coluna central!)
-        tab_entrar, tab_cadastro = st.tabs(["🔐 Entrar", "📝 Criar Conta"])
+        # 2. ABAS (Login, Cadastro e agora Recuperação)
+        tab_entrar, tab_cadastro, tab_recuperar = st.tabs(["🔐 Entrar", "📝 Criar Conta", "🔑 Esqueci a Senha"])
 
         # ===================================================
         # ABA 1: LOGIN
         # ===================================================
         with tab_entrar:
-            with st.container(border=True):
-                st.markdown("### Bem-vindo")
-                with st.form("login_form"):
-                    email = st.text_input("E-mail")
-                    senha = st.text_input("Senha", type="password")
-                    
-                    st.write("")
-                    if st.form_submit_button("Acessar", use_container_width=True):
-                        user = db.executar_query("SELECT * FROM usuarios WHERE email=%s AND senha=%s", (email, senha), fetch=True)
-                        if user:
-                            if user[0]['status_conta'] == 'Ativo':
-                                st.session_state.logado = True
-                                st.session_state.usuario = dict(user[0])
-                                st.session_state.sidebar_state = 'expanded'
-                                st.rerun()
+            c_l1, c_l2, c_l3 = st.columns([0.6, 0.8, 0.6])
+            with c_l2:
+                with st.container(border=True):
+                    st.markdown("### Bem-vindo")
+                    with st.form("login_form"):
+                        email = st.text_input("E-mail").strip().lower()
+                        senha = st.text_input("Senha", type="password")
+                        
+                        if st.form_submit_button("Acessar", use_container_width=True):
+                            user_res = db.executar_query("SELECT * FROM usuarios WHERE email=%s AND senha=%s", (email, senha), fetch=True)
+                            
+                            if user_res:
+                                user = user_res[0]
+                                if user['status_conta'] == 'Ativo':
+                                    st.session_state.logado = True
+                                    st.session_state.usuario = dict(user)
+                                    st.session_state.sidebar_state = 'expanded'
+                                    st.success(f"Olá, {user['nome_completo']}!")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                else:
+                                    st.warning("🔒 Conta em análise.")
                             else:
-                                st.warning("🔒 Conta em análise.")
-                        else:
-                            st.error("❌ Dados incorretos.")
+                                st.error("❌ E-mail ou senha incorretos.")
 
         # ===================================================
-        # ABA 2: AUTO-CADASTRO (DINÂMICO)
+        # ABA 2: AUTO-CADASTRO
         # ===================================================
         with tab_cadastro:
             with st.container(border=True):
-                st.info("Preencha para solicitar acesso.")
-
+                st.info("Preencha para solicitar acesso à sua unidade.")
                 filiais = db.executar_query("SELECT id, nome FROM filiais ORDER BY nome", fetch=True)
                 opts_filial = {f['nome']: f['id'] for f in filiais} if filiais else {}
                 
-                # --- FORMULÁRIO INTERATIVO (SEM st.form para permitir atualização) ---
+                c1, c2, c3 = st.columns(3)
+                filial_selecionada = c1.selectbox("📍 Unidade", list(opts_filial.keys()) if opts_filial else ["Nenhuma"])
+                nome = c2.text_input("Nome Completo")
+                zap = c3.text_input("WhatsApp")
                 
-                # Filial
-                filial_selecionada = st.selectbox("📍 Unidade", list(opts_filial.keys()) if opts_filial else ["Nenhuma"])
+                c4, c5, c6 = st.columns(3)
+                nasc = c4.date_input("Nascimento", value=date(2000, 1, 1), min_value=date(1920, 1, 1), max_value=date.today())
+                email_novo = c5.text_input("E-mail (Login)")
                 
-                st.markdown("---")
-                
-                # Dados Pessoais
-                nome = st.text_input("Nome Completo")
-                
-                c_nasc, c_zap = st.columns(2)
-                # O st.rerun automático ao mudar a data fará a lógica do Kids funcionar
-                nasc = c_nasc.date_input("Nascimento", value=date(2000, 1, 1), min_value=date(1920, 1, 1), max_value=date.today())
-                zap = c_zap.text_input("WhatsApp")
-                
-                # Lógica Kids
-                idade = (date.today() - nasc).days // 365
+                idade = utils.calcular_idade_ano(nasc)
                 is_kid = idade < 16
+                with c6:
+                    if is_kid: st.warning(f"👶 Kids ({idade} anos)")
+                    else: st.success(f"🥋 Adulto ({idade} anos)")
+
+                c7, c8, c9 = st.columns(3)
+                senha_nova = c7.text_input("Crie uma Senha", type="password")
+                senha_conf = c8.text_input("Confirme a Senha", type="password")
+                
                 nm_resp, tel_resp = None, None
-
                 if is_kid:
-                    st.warning(f"👶 Menor ({idade} anos). Responsável:")
-                    nm_resp = st.text_input("Nome Responsável")
-                    tel_resp = st.text_input("Tel. Responsável")
-                
-                st.markdown("---")
-                
-                # Login
-                email_novo = st.text_input("E-mail (Login)")
-                c_s1, c_s2 = st.columns(2)
-                senha_nova = c_s1.text_input("Senha", type="password")
-                senha_conf = c_s2.text_input("Confirmar", type="password")
-                
-                st.markdown("---")
-                
-                # Vida Marcial
-                c_faixa, c_grau = st.columns([1.5, 1])
-                faixa = c_faixa.selectbox("Faixa", utils.ORDEM_FAIXAS)
-                graus = c_grau.selectbox("Graus", [0, 1, 2, 3, 4])
-                
-                # Datas
-                dt_inicio = st.date_input("Início dos Treinos", value=date.today())
-                
-                c_d1, c_d2 = st.columns(2)
-                lbl_faixa = "Data da Faixa"
-                dt_faixa = c_d1.date_input(lbl_faixa, value=date.today())
+                    nm_resp = c9.text_input("Nome do Responsável")
+                    tel_resp = st.text_input("WhatsApp do Responsável")
 
+                st.markdown("---")
+                c10, c11, c12 = st.columns(3)
+                faixa = c10.selectbox("Sua Faixa Atual", utils.ORDEM_FAIXAS)
+                graus = c11.selectbox("Quantos Graus?", [0, 1, 2, 3, 4])
+                dt_inicio = c12.date_input("Início nos Treinos", value=date.today())
+                
+                c13, c14, c15 = st.columns(3)
+                dt_faixa = c13.date_input("Data da Faixa Atual", value=date.today())
+                
                 dt_ultimo_grau = None
                 if graus > 0:
-                    dt_ultimo_grau = c_d2.date_input(f"Data {graus}º Grau", value=date.today())
-                else:
-                    c_d2.empty()
+                    dt_ultimo_grau = c14.date_input(f"Data do {graus}º Grau", value=date.today())
 
-                st.write("")
-                # Botão de Ação
-                if st.button("✅ Criar Conta", type="primary", use_container_width=True):
-                    # Validações
-                    erro = False
-                    if not filial_selecionada:
-                        st.error("Selecione a filial."); erro = True
+                if st.button("✅ Solicitar Cadastro", type="primary", use_container_width=True):
                     if not nome or not email_novo or not senha_nova:
-                        st.error("Preencha nome, email e senha."); erro = True
-                    if senha_nova != senha_conf:
-                        st.error("As senhas não conferem."); erro = True
-                    if is_kid and (not nm_resp or not tel_resp):
-                        st.error("Dados do responsável obrigatórios."); erro = True
+                        st.error("Campos obrigatórios vazios.")
+                    elif senha_nova != senha_conf:
+                        st.error("As senhas não conferem.")
+                    else:
+                        data_referencia_grau = dt_ultimo_grau if graus > 0 else dt_faixa
+                        id_filial = opts_filial.get(filial_selecionada)
+                        res = db.executar_query(
+                            """INSERT INTO usuarios 
+                            (nome_completo, email, senha, telefone, data_nascimento, faixa, graus, 
+                            id_filial, perfil, status_conta, data_inicio, data_ultimo_grau, 
+                            nome_responsavel, telefone_responsavel) 
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'aluno', 'Pendente', %s, %s, %s, %s)""",
+                            (nome, email_novo, senha_nova, zap, nasc, faixa, graus, id_filial, 
+                             dt_inicio, data_referencia_grau, nm_resp, tel_resp)
+                        )
+                        if res == "ERRO_DUPLICADO": st.error("❌ E-mail já cadastrado.")
+                        elif res:
+                            st.success("✅ Solicitação enviada!"); time.sleep(2); st.rerun()
+
+        # ===================================================
+        # ABA 3: RECUPERAR SENHA (OPÇÃO 2)
+        # ===================================================
+        with tab_recuperar:
+            c_r1, c_r2, c_r3 = st.columns([0.6, 0.8, 0.6])
+            with c_r2:
+                with st.container(border=True):
+                    st.markdown("### Recuperar Acesso")
+                    st.caption("Confirme seu e-mail e nascimento para criar uma nova senha.")
                     
-                    if not erro:
-                        # Lógica de Datas
-                        data_grau_banco = dt_ultimo_grau if graus > 0 else dt_faixa
-                        id_filial = opts_filial[filial_selecionada]
+                    with st.form("form_esqueci_senha"):
+                        rec_email = st.text_input("E-mail cadastrado").strip().lower()
+                        rec_nasc = st.date_input("Sua Data de Nascimento", value=date(2000, 1, 1), min_value=date(1920, 1, 1), max_value=date.today())
                         
-                        # NOVA LÓGICA: Separando o Try do Rerun e status = Pendente
-                        cadastrou = False
-                        try:
-                            db.executar_query(
-                                """INSERT INTO usuarios 
-                                (nome_completo, email, senha, telefone, data_nascimento, faixa, graus, id_filial, perfil, status_conta, data_inicio, data_graduacao, data_ultimo_grau, nome_responsavel, telefone_responsavel) 
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'aluno', 'Pendente', %s, %s, %s, %s, %s)""",
-                                (nome, email_novo, senha_nova, zap, nasc, faixa, graus, id_filial, dt_inicio, dt_faixa, data_grau_banco, nm_resp, tel_resp)
-                            )
-                            cadastrou = True
-                        except Exception as e:
-                            st.error("❌ E-mail já cadastrado.")
-                            
-                        # O Rerun acontece livre, leve e solto aqui fora!
-                        if cadastrou:
-                            st.success("✅ Solicitação enviada! Aguarde a aprovação do seu professor.")
-                            time.sleep(2)
-                            st.rerun()
+                        st.markdown("---")
+                        nova_s = st.text_input("Nova Senha", type="password")
+                        nova_s_conf = st.text_input("Confirme a Nova Senha", type="password")
+                        
+                        if st.form_submit_button("Redefinir Senha", use_container_width=True):
+                            if nova_s != nova_s_conf:
+                                st.error("As senhas não conferem.")
+                            elif len(nova_s) < 4:
+                                st.error("A senha deve ser mais forte.")
+                            else:
+                                # Verifica se o usuário existe com esses dois dados
+                                check = db.executar_query(
+                                    "SELECT id FROM usuarios WHERE email=%s AND data_nascimento=%s",
+                                    (rec_email, rec_nasc), fetch=True
+                                )
+                                
+                                if check:
+                                    # Atualiza
+                                    sucesso = db.executar_query(
+                                        "UPDATE usuarios SET senha=%s WHERE id=%s",
+                                        (nova_s, check[0]['id'])
+                                    )
+                                    if sucesso:
+                                        st.success("✅ Senha alterada! Agora você já pode entrar.")
+                                        time.sleep(2)
+                                        st.rerun()
+                                else:
+                                    st.error("❌ Dados não conferem. Se persistir, fale com seu professor.")

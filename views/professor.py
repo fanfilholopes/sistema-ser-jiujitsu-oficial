@@ -3,6 +3,8 @@ import database as db
 import utils
 import pandas as pd
 from datetime import date
+# Importação explícita do novo motor para garantir acesso às funções
+from core.motores_graduacao import calcular_status_graduacao
 import time
 import os
 
@@ -68,17 +70,13 @@ def painel_professor():
         pass
 
     # =======================================================
-    # --- ABA ÚNICA: GESTÃO DE AULAS ---
+    # --- ABA ÚNICA: GESTÃO DE TATAME ---
     # =======================================================
     st.title("🛡️ Gestão de Tatame")
     
     # 1. VALIDAÇÃO DE CHECK-INS (O ACEITE)
     st.subheader("🔔 Check-ins Pendentes de Aceite")
     
-    # --- MUDANÇA PARA PROFESSOR VIAJANTE ---
-    # Agora buscamos check-ins onde:
-    # A) A turma pertence à filial de origem do professor
-    # B) OU o professor é o responsável direto pela turma (mesmo em outra filial)
     sql_pendencias = """
         SELECT c.id, u.nome_completo, t.nome as turma, t.horario, f.nome as nome_filial
         FROM checkins c
@@ -99,7 +97,6 @@ def painel_professor():
             with st.container(border=True):
                 c_info, c_btn = st.columns([3, 1.2])
                 c_info.markdown(f"**{p['nome_completo']}**")
-                # Mostra a filial caso seja uma aula fora da sede
                 txt_local = f" | 🏢 {p['nome_filial']}" if p['nome_filial'] else ""
                 c_info.caption(f"Turma: {p['turma']} às {p['horario']}{txt_local}")
                 
@@ -137,3 +134,83 @@ def painel_professor():
             st.markdown(f"- **{c['nome_completo']}** ({c['faixa']}) <span style='color:grey'>| {c['turma']} ({c['nome_filial']})</span>", unsafe_allow_html=True)
     else:
         st.caption("Nenhum aluno confirmado ainda.")
+
+    st.divider()
+
+    # =======================================================
+    # --- 3. GESTÃO DE GRADUAÇÕES (OTIMIZADO) ---
+    # =======================================================
+    st.subheader("🎓 Monitoramento de Graduações")
+    
+    # Buscamos todos os alunos vinculados à filial do professor
+    sql_meus_alunos = """
+        SELECT id, nome_completo, faixa, graus, data_nascimento, data_ultimo_grau, data_inicio
+        FROM usuarios 
+        WHERE perfil = 'aluno' 
+        AND id_filial = %s
+        ORDER BY nome_completo
+    """
+    meus_alunos = db.executar_query(sql_meus_alunos, (id_filial_origem,), fetch=True)
+
+    if meus_alunos:
+        # --- OTIMIZAÇÃO: BUSCA DE PRESENÇAS EM LOTE ---
+        # Buscamos a contagem de presenças de TODOS os alunos de uma vez
+        sql_lote_presencas = """
+            SELECT id_aluno, COUNT(*) as total 
+            FROM checkins 
+            WHERE id_filial = %s AND validado = TRUE 
+            GROUP BY id_aluno
+        """
+        res_lote = db.executar_query(sql_lote_presencas, (id_filial_origem,), fetch=True)
+        # Criamos um mapa {id_aluno: total_presencas} para consulta rápida em memória
+        mapa_presencas = {r['id_aluno']: r['total'] for r in res_lote} if res_lote else {}
+
+        st.caption("Acompanhe o progresso técnico e assiduidade dos seus alunos.")
+        
+        for aluno in meus_alunos:
+            # Pega o total do mapa em vez de fazer uma query por aluno (isso acaba com a lentidão)
+            total_presencas = mapa_presencas.get(aluno['id'], 0)
+            
+            # Data de referência para exibição na interface
+            data_ref = aluno.get('data_ultimo_grau') or aluno.get('data_inicio') or date(2020, 1, 1)
+            
+            # CONSULTA AO MOTOR DE GRADUAÇÃO (Calcula regras Kids e Adulto)
+            apto, msg, progresso, is_faixa = calcular_status_graduacao(aluno, total_presencas)
+            
+            # Interface Visual por Aluno (Expander)
+            with st.expander(f"👤 {aluno['nome_completo']} | {aluno['faixa']} ({aluno['graus']}º Grau)"):
+                c1, c2 = st.columns([3, 1.2])
+                
+                with c1:
+                    st.markdown("**Progresso para o próximo nível:**")
+                    st.progress(float(progresso))
+                    st.caption(f"🏁 {msg} | 🥋 {total_presencas} aulas desde {data_ref.strftime('%d/%m/%Y')}")
+
+                with c2:
+                    if apto:
+                        if is_faixa:
+                            st.warning("🔥 **EXAME DE FAIXA**")
+                            if st.button("Indicar Faixa", key=f"btn_faixa_{aluno['id']}", use_container_width=True):
+                                sql_sol = """
+                                    INSERT INTO solicitacoes_graduacao (id_aluno, id_filial, faixa_atual, status) 
+                                    VALUES (%s, %s, %s, 'Pendente')
+                                """
+                                db.executar_query(sql_sol, (aluno['id'], id_filial_origem, aluno['faixa']))
+                                st.info("Solicitação enviada!")
+                        else:
+                            st.info("🎓 **NOVO GRAU**")
+                            if st.button("Conceder Grau", key=f"btn_grau_{aluno['id']}", use_container_width=True):
+                                sucesso = db.registrar_grau_direto(aluno['id'], id_prof)
+                                if sucesso:
+                                    st.balloons()
+                                    st.success("Grau registrado!")
+                                    time.sleep(1)
+                                    st.rerun()
+                    else:
+                        st.button("⏳ Em análise", disabled=True, key=f"btn_bloq_{aluno['id']}", use_container_width=True)
+    else:
+        st.info("Nenhum aluno encontrado para monitoramento nesta filial.")
+
+# Execução do painel
+if __name__ == "__main__":
+    painel_professor()
