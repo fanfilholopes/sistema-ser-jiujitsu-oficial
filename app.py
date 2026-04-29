@@ -23,6 +23,25 @@ st.set_page_config(
     initial_sidebar_state="collapsed" if not st.session_state.logado else "expanded"
 )
 
+# No topo do app.py, após o set_page_config
+st.markdown(
+    f"""
+    <link rel="manifest" href="/static/manifest.json">
+    <script>
+        if ('serviceWorker' in navigator) {{
+          window.addEventListener('load', function() {{
+            navigator.serviceWorker.register('/static/sw.js').then(function(registration) {{
+              console.log('ServiceWorker registrado com sucesso:', registration.scope);
+            }}, function(err) {{
+              console.log('Falha no ServiceWorker:', err);
+            }});
+          }});
+        }}
+    </script>
+    """,
+    unsafe_allow_html=True
+)
+
 # --- 2. CSS GLOBAL (REMOÇÃO DA SIDEBAR E IDENTIDADE VISUAL) ---
 # Se não estiver logado, aplicamos o CSS que mata a sidebar e centraliza o conteúdo
 css_customizado = ""
