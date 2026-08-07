@@ -168,46 +168,46 @@ def painel_professor():
         st.caption("Acompanhe o progresso técnico e assiduidade dos seus alunos.")
         
         for aluno in meus_alunos:
-            # Pega o total do mapa em vez de fazer uma query por aluno (isso acaba com a lentidão)
             total_presencas = mapa_presencas.get(aluno['id'], 0)
-            
-            # Data de referência para exibição na interface
             data_ref = aluno.get('data_ultimo_grau') or aluno.get('data_inicio') or date(2020, 1, 1)
             
-            # CONSULTA AO MOTOR DE GRADUAÇÃO (Calcula regras Kids e Adulto)
-            apto, msg, progresso, is_faixa = calcular_status_graduacao(aluno, total_presencas)
+            # CONSULTA AO MOTOR DE GRADUAÇÃO (O novo motor retorna 3 valores)
+            apto, msg, is_faixa = calcular_status_graduacao(aluno, total_presencas)
+            
+            # Formatação visual de acordo com o status
+            cor_status = "green" if apto else "orange"
+            icone = "🔥" if (apto and is_faixa) else ("🎓" if apto else "⏳")
             
             # Interface Visual por Aluno (Expander)
             with st.expander(f"👤 {aluno['nome_completo']} | {aluno['faixa']} ({aluno['graus']}º Grau)"):
                 c1, c2 = st.columns([3, 1.2])
                 
                 with c1:
-                    st.markdown("**Progresso para o próximo nível:**")
-                    st.progress(float(progresso))
-                    st.caption(f"🏁 {msg} | 🥋 {total_presencas} aulas desde {data_ref.strftime('%d/%m/%Y')}")
+                    st.markdown(f"**Status:** :{cor_status}[{icone} {msg}]")
+                    st.caption(f"🥋 {total_presencas} aulas computadas desde {data_ref.strftime('%d/%m/%Y')}")
 
                 with c2:
+                    # Botão só aparece se o aluno estiver 100% apto
                     if apto:
                         if is_faixa:
-                            st.warning("🔥 **EXAME DE FAIXA**")
-                            if st.button("Indicar Faixa", key=f"btn_faixa_{aluno['id']}", use_container_width=True):
+                            if st.button("Indicar Faixa", key=f"btn_faixa_{aluno['id']}", use_container_width=True, type="primary"):
                                 sql_sol = """
                                     INSERT INTO solicitacoes_graduacao (id_aluno, id_filial, faixa_atual, status) 
                                     VALUES (%s, %s, %s, 'Pendente')
                                 """
                                 db.executar_query(sql_sol, (aluno['id'], id_filial_origem, aluno['faixa']))
-                                st.info("Solicitação enviada!")
+                                st.success("Solicitação enviada!")
+                                time.sleep(1)
+                                st.rerun()
                         else:
-                            st.info("🎓 **NOVO GRAU**")
-                            if st.button("Conceder Grau", key=f"btn_grau_{aluno['id']}", use_container_width=True):
+                            if st.button("Conceder Grau", key=f"btn_grau_{aluno['id']}", use_container_width=True, type="primary"):
                                 sucesso = db.registrar_grau_direto(aluno['id'], id_prof)
                                 if sucesso:
                                     st.balloons()
                                     st.success("Grau registrado!")
                                     time.sleep(1)
                                     st.rerun()
-                    else:
-                        st.button("⏳ Em análise", disabled=True, key=f"btn_bloq_{aluno['id']}", use_container_width=True)
+                    # Quando NÃO estiver apto, nenhum botão inútil será renderizado. A interface fica limpa.
     else:
         st.info("Nenhum aluno encontrado para monitoramento nesta filial.")
 
