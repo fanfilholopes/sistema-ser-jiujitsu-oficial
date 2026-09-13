@@ -154,7 +154,6 @@ def painel_professor():
 
     if meus_alunos:
         # --- OTIMIZAÇÃO: BUSCA DE PRESENÇAS EM LOTE ---
-        # Buscamos a contagem de presenças de TODOS os alunos de uma vez
         sql_lote_presencas = """
             SELECT id_aluno, COUNT(*) as total 
             FROM checkins 
@@ -164,6 +163,15 @@ def painel_professor():
         res_lote = db.executar_query(sql_lote_presencas, (id_filial_origem,), fetch=True)
         # Criamos um mapa {id_aluno: total_presencas} para consulta rápida em memória
         mapa_presencas = {r['id_aluno']: r['total'] for r in res_lote} if res_lote else {}
+
+        # --- CORREÇÃO: BUSCA INDICAÇÕES ATIVAS PARA BLOQUEAR O BOTÃO ---
+        sql_solic_ativas = """
+            SELECT id_aluno, status 
+            FROM solicitacoes_graduacao 
+            WHERE id_filial = %s AND status IN ('Pendente', 'Aceito', 'Realizado')
+        """
+        solic_ativas = db.executar_query(sql_solic_ativas, (id_filial_origem,), fetch=True)
+        mapa_solic_ativas = {s['id_aluno']: s['status'] for s in solic_ativas} if solic_ativas else {}
 
         st.caption("Acompanhe o progresso técnico e assiduidade dos seus alunos.")
         
@@ -187,8 +195,11 @@ def painel_professor():
                     st.caption(f"🥋 {total_presencas} aulas computadas desde {data_ref.strftime('%d/%m/%Y')}")
 
                 with c2:
-                    # Botão só aparece se o aluno estiver 100% apto
-                    if apto:
+                    # CORREÇÃO: Desabilita o botão se já houver uma indicação rodando
+                    if aluno['id'] in mapa_solic_ativas:
+                        status_atual = mapa_solic_ativas[aluno['id']]
+                        st.button(f"Em andamento ({status_atual})", key=f"btn_bloq_{aluno['id']}", disabled=True, use_container_width=True)
+                    elif apto:
                         if is_faixa:
                             if st.button("Indicar Faixa", key=f"btn_faixa_{aluno['id']}", use_container_width=True, type="primary"):
                                 sql_sol = """

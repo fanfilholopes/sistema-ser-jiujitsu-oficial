@@ -126,7 +126,7 @@ def painel_lider():
                                 "INSERT INTO usuarios (nome_completo, email, senha, id_filial, faixa, data_nascimento, telefone, perfil, status_conta) VALUES (%s,%s,'123',%s,%s,%s,%s,'aluno','Ativo')",
                                 (n_nome, n_email, d_filiais[n_filial], n_faixa, n_nasc, n_tel)
                             )
-                            st.success(f"Aluno {n_nome} matriculado!")
+                            st.success(f"Aluno {n_nome.strip()} matriculado!")
                             time.sleep(1); st.rerun()
 
             st.divider()
@@ -141,48 +141,74 @@ def painel_lider():
                     for r in resultados:
                         with st.container(border=True):
                             col_r1, col_r2 = st.columns([4, 1])
-                            col_r1.write(f"**{r['nome_completo']}** | {r['faixa']} | 📍 {r['filial']}")
+                            col_r1.write(f"**{r['nome_completo'].strip()}** | {r['faixa']} | 📍 {r['filial']}")
                             if col_r2.button("Inativar", key=f"global_del_{r['id']}"):
                                 db.executar_query("UPDATE usuarios SET status_conta='Inativo' WHERE id=%s", (r['id'],))
                                 st.rerun()
 
-        # --- ABA 3: HOMOLOGAÇÃO ---
+        # --- ABA 3: HOMOLOGAÇÃO & CERTIFICADOS ---
         with tab_homolog:
-            st.subheader("🎓 Homologação de Graduações")
+            st.subheader("🎓 Homologação Oficial (Pós-Exame)")
+            st.caption("Apenas alunos que já realizaram e foram aprovados no exame aparecem aqui.")
+            
             solicitacoes = db.executar_query("""
                 SELECT s.id, u.nome_completo, f.nome as filial, s.faixa_atual, s.nova_faixa, s.id_aluno
                 FROM solicitacoes_graduacao s
                 JOIN usuarios u ON s.id_aluno = u.id
                 JOIN filiais f ON s.id_filial = f.id
-                WHERE s.status = 'Aguardando Homologacao'
+                WHERE s.status = 'Realizado'
             """, fetch=True)
+            
             if solicitacoes:
+                st.warning(f"🔔 Você tem {len(solicitacoes)} graduações aguardando a homologação final!")
                 for s in solicitacoes:
                     with st.container(border=True):
                         c1, c2, c3 = st.columns([3, 2, 1])
-                        c1.write(f"**{s['nome_completo']}** ({s['filial']})")
+                        c1.write(f"**{s['nome_completo'].strip()}** ({s['filial']})")
                         c2.info(f"{s['faixa_atual']} ➔ {s['nova_faixa']}")
-                        if c3.button("✅ Homologar", key=f"hom_{s['id']}", use_container_width=True):
-                            db.executar_query("UPDATE usuarios SET faixa=%s, graus=0 WHERE id=%s", (s['nova_faixa'], s['id_aluno']))
-                            db.executar_query("UPDATE solicitacoes_graduacao SET status='Concluido' WHERE id=%s", (s['id'],))
-                            st.success("Graduação assinada!"); time.sleep(0.5); st.rerun()
+                        
+                        if c3.button("✅ Homologar", key=f"hom_{s['id']}", use_container_width=True, type="primary"):
+                            # CORREÇÃO: Utiliza a função oficial para atualizar Faixa, Graus, Histórico e zerar a Data do Cronômetro
+                            db.registrar_nova_faixa(s['id_aluno'], s['nova_faixa'], manter_graus=False)
+                            
+                            # Encerra o fluxo Kanban
+                            db.executar_query("UPDATE solicitacoes_graduacao SET status='Homologado' WHERE id=%s", (s['id'],))
+                            
+                            st.success("Graduação homologada com sucesso!")
+                            time.sleep(0.5)
+                            st.rerun()
             else:
-                st.success("Tudo em dia!")
+                st.success("Tudo em dia! Nenhuma homologação pendente no momento.")
+
+            st.divider()
+
+            st.markdown("#### 🖨️ Relação de Diplomas (Últimos Homologados)")
+            certificados = db.executar_query("""
+                SELECT u.nome_completo as "Atleta", f.nome as "Filial", s.nova_faixa as "Nova Faixa"
+                FROM solicitacoes_graduacao s
+                JOIN usuarios u ON s.id_aluno = u.id
+                JOIN filiais f ON s.id_filial = f.id
+                WHERE s.status = 'Homologado'
+                ORDER BY s.id DESC LIMIT 20
+            """, fetch=True)
+            
+            if certificados:
+                df_certs = pd.DataFrame(certificados)
+                st.dataframe(df_certs, use_container_width=True, hide_index=True)
+            else:
+                st.caption("Nenhum histórico recente.")
 
         # --- ABA 4: GESTÃO DE FILIAIS (LAYOUT OTIMIZADO) ---
         with tab_filiais:
             st.subheader("🏢 Administração de Unidades")
             
-            # 1. CADASTRO DE NOVA UNIDADE
             with st.expander("➕ Cadastrar Nova Unidade", expanded=False):
                 with st.form("nova_filial_form_v3"):
-                    # Linha 1: Dados Principais em 3 colunas
                     c1, c2, c3 = st.columns([2, 1, 1])
                     f_nome = c1.text_input("Nome da Unidade")
                     f_municipio = c2.text_input("Município")
                     f_estado = c3.text_input("UF", max_chars=2)
                     
-                    # Linha 2: Contato e Logradouro
                     c4, c5 = st.columns([1, 2])
                     f_tel = c4.text_input("Telefone")
                     f_rua = c5.text_input("Logradouro (Rua, Nº, Bairro)")
@@ -190,16 +216,14 @@ def painel_lider():
                     st.markdown("---")
                     st.caption("Escolha o usuário que será o Administrador desta unidade:")
                     
-                    # Busca usuários ativos para promoção
                     u_lista = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE status_conta='Ativo' ORDER BY nome_completo", fetch=True)
-                    d_u = {u['nome_completo']: u['id'] for u in u_lista} if u_lista else {}
+                    d_u = {u['nome_completo'].strip(): u['id'] for u in u_lista} if u_lista else {}
                     f_adm_nome = st.selectbox("Responsável / Admin", ["--- Selecione ---"] + list(d_u.keys()))
                     
                     if st.form_submit_button("🚀 Criar Unidade e Promover Admin", type="primary", use_container_width=True):
                         if f_nome and f_municipio and f_adm_nome != "--- Selecione ---":
                             loc_full = f"{f_rua} - {f_municipio}/{f_estado}"
                             
-                            # Cria a filial
                             res = db.executar_query(
                                 "INSERT INTO filiais (nome, endereco, telefone_contato, responsavel_nome) VALUES (%s, %s, %s, %s) RETURNING id",
                                 (f_nome, loc_full, f_tel, f_adm_nome), fetch=True
@@ -208,7 +232,6 @@ def painel_lider():
                             if res:
                                 nova_id = res[0]['id']
                                 id_user = d_u[f_adm_nome]
-                                # Promove o usuário e vincula à filial
                                 db.executar_query("UPDATE usuarios SET perfil='adm_filial', id_filial=%s WHERE id=%s", (nova_id, id_user))
                                 st.success(f"Unidade '{f_nome}' criada com sucesso!")
                                 time.sleep(1)
@@ -218,13 +241,11 @@ def painel_lider():
 
             st.divider()
 
-            # 2. LISTAGEM COM EDIÇÃO E EXCLUSÃO (LAYOUT DE CARDS)
             st.markdown("#### 📍 Unidades Cadastradas")
             filiais_db = db.executar_query("SELECT * FROM filiais ORDER BY nome", fetch=True)
             
             if filiais_db:
                 for f in filiais_db:
-                    # Extrai Município/UF para o cabeçalho
                     cidade_uf = f['endereco'].split('-')[-1].strip() if '-' in f['endereco'] else ""
                     
                     with st.expander(f"📍 {f['nome']} | {cidade_uf}"):
@@ -236,7 +257,6 @@ def painel_lider():
                             
                             u_end = st.text_input("Endereço Completo", value=f['endereco'])
                             
-                            # Botões de Ação
                             b_save, b_del, _ = st.columns([1, 1, 2])
                             
                             if b_save.form_submit_button("💾 Salvar Alterações", use_container_width=True):

@@ -14,6 +14,43 @@ def painel_adm_filial(renderizar_sidebar=True):
     
     eh_admin = perfil in ['adm_filial', 'lider']
     
+    # --- AUTO-CORREÇÃO DE BANCO DE DADOS (PATCH DE LIMPEZA GERAL) ---
+    
+    # 1. Resolve o bug do 1º Grau antecipado (Sincroniza o relógio)
+    db.executar_query("""
+        UPDATE usuarios u
+        SET data_ultimo_grau = (
+            SELECT MAX(data_graduacao) 
+            FROM historico_graduacoes 
+            WHERE id_aluno = u.id
+        )
+        WHERE u.graus = 0 
+        AND (
+            u.data_ultimo_grau < (SELECT MAX(data_graduacao) FROM historico_graduacoes WHERE id_aluno = u.id)
+            OR u.data_ultimo_grau IS NULL
+        )
+    """)
+
+    # 2. Limpa solicitações duplicadas
+    db.executar_query("""
+        DELETE FROM solicitacoes_graduacao
+        WHERE id NOT IN (
+            SELECT MAX(id) FROM solicitacoes_graduacao 
+            WHERE status IN ('Pendente', 'Aceito', 'Realizado') 
+            GROUP BY id_aluno
+        ) AND status IN ('Pendente', 'Aceito', 'Realizado')
+    """)
+
+    # 3. Restaura a faixa de quem ficou com "A Definir"
+    db.executar_query("""
+        UPDATE usuarios u
+        SET faixa = COALESCE(
+            (SELECT faixa FROM historico_graduacoes WHERE id_aluno = u.id AND faixa != 'A Definir' ORDER BY data_graduacao DESC LIMIT 1),
+            'Branca'
+        )
+        WHERE faixa = 'A Definir'
+    """)
+
     # =======================================================
     # --- NAVEGAÇÃO & SIDEBAR ---
     # =======================================================
@@ -27,7 +64,7 @@ def painel_adm_filial(renderizar_sidebar=True):
             pass
         
         st.sidebar.markdown(f"## {nome_f}")
-        st.sidebar.caption(f"Olá, {user['nome_completo']}")
+        st.sidebar.caption(f"Olá, {user['nome_completo'].strip()}")
         st.sidebar.caption(f"🛡️ {utils.CARGOS.get(perfil, perfil).upper()}")
         st.sidebar.markdown("---")
         
@@ -51,7 +88,7 @@ def painel_adm_filial(renderizar_sidebar=True):
         st.divider()
 
     # =======================================================
-    # 1. DASHBOARD (PAINEL DE CONTROLE - NOMES LIMPOS)
+    # 1. DASHBOARD (PAINEL DE CONTROLE)
     # =======================================================
     if menu_selecionado == "📊 Painel":
         # --- MURAL DE AVISOS ---
@@ -92,7 +129,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                 with cols_new[i % 3]:
                     with st.container(border=True):
                         idade_n = utils.calcular_idade_ano(novo['data_nascimento'])
-                        st.markdown(f"{novo['nome_completo']}")
+                        st.markdown(f"{novo['nome_completo'].strip()}")
                         st.caption(f"{novo['faixa']} ({novo['graus']}º G) | 🎂 {idade_n} anos")
                         
                         b_aprov, b_recus = st.columns(2)
@@ -129,11 +166,11 @@ def painel_adm_filial(renderizar_sidebar=True):
                         c_n, c_z, c_i = st.columns([2, 1, 1])
                         ult_t = s['ultimo_treino'].strftime('%d/%m/%Y') if s['ultimo_treino'] else "Nunca treinou"
                         dias_s = (date.today() - s['ultimo_treino']).days if s['ultimo_treino'] else "∞"
-                        c_n.markdown(f"{s['nome_completo']}") 
+                        c_n.markdown(f"{s['nome_completo'].strip()}") 
                         c_n.caption(f"Último: {ult_t} ({dias_s} dias)")
                         
                         tel_s = ''.join(filter(str.isdigit, str(s['telefone'] or "")))
-                        msg_s = f"Olá {s['nome_completo']}, sentimos sua falta na SER Jiu-Jitsu!"
+                        msg_s = f"Olá {s['nome_completo'].strip()}, sentimos sua falta na SER Jiu-Jitsu!"
                         c_z.link_button("💬", f"https://wa.me/55{tel_s}?text={msg_s}", use_container_width=True, help="Enviar mensagem")
                         if c_i.button("🚫", key=f"ina_p_{s['id']}", use_container_width=True, help="Inativar aluno"):
                             db.executar_query("UPDATE usuarios SET status_conta='Inativo' WHERE id=%s", (s['id'],))
@@ -154,7 +191,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                 for n in aniversariantes:
                     eh_h = int(n['dia']) == hoje_d
                     with st.container(border=True):
-                        st.markdown(f"{'🎉 HOJE | ' if eh_h else ''}{int(n['dia']):02d} - {n['nome_completo']}")
+                        st.markdown(f"{'🎉 HOJE | ' if eh_h else ''}{int(n['dia']):02d} - {n['nome_completo'].strip()}")
                         if eh_h:
                             t_n = ''.join(filter(str.isdigit, str(n['telefone'] or "")))
                             st.link_button("🥳 Dar Parabéns", f"https://wa.me/55{t_n}?text=Parabéns!", type="primary", use_container_width=True)
@@ -163,51 +200,35 @@ def painel_adm_filial(renderizar_sidebar=True):
 
         st.divider()
 
-        # --- BLOCO INFERIOR: INDICADOS PARA EXAME (ESQ) E GRÁFICO (DIR) ---
-        col_inf_esq, col_inf_dir = st.columns([1.2, 1])
-
-        with col_inf_esq:
-            st.subheader("🎓 Indicações para Exame de Faixa")
-            indicacoes = db.executar_query("""
-                SELECT s.id, u.id as id_aluno, u.nome_completo, s.faixa_atual, s.nova_faixa 
-                FROM solicitacoes_graduacao s 
-                JOIN usuarios u ON s.id_aluno = u.id 
-                WHERE s.id_filial = %s AND s.status = 'Pendente'
-            """, (id_filial,), fetch=True)
-
-            if indicacoes:
-                for ind in indicacoes:
-                    with st.container(border=True):
-                        c_txt, c_btn_ok = st.columns([2, 1])
-                        c_txt.markdown(f"{ind['nome_completo']}") 
-                        c_txt.caption(f"De: {ind['faixa_atual']} ➔ Para: {ind['nova_faixa']}")
-                        if c_btn_ok.button("Homologar", key=f"hom_dash_{ind['id']}", use_container_width=True, type="primary"):
-                            db.registrar_nova_faixa(ind['id_aluno'], ind['nova_faixa'])
-                            db.executar_query("UPDATE solicitacoes_graduacao SET status='Concluido' WHERE id=%s", (ind['id'],))
-                            st.rerun()
-            else:
-                st.info("Nenhuma indicação de nova faixa pendente.")
-
-        with col_inf_dir:
-            st.subheader("📊 Distribuição por Faixa")
-            dados_f = db.executar_query("""
-                SELECT faixa, COUNT(*) as qtd FROM usuarios 
-                WHERE id_filial=%s AND status_conta='Ativo' AND perfil='aluno' GROUP BY faixa
-            """, (id_filial,), fetch=True)
-            if dados_f:
-                df_f = pd.DataFrame(dados_f, columns=['Faixa', 'Qtd'])
-                c_map = {'Branca': '#FFFFFF', 'Azul': '#0000FF', 'Roxa': '#8A2BE2', 'Marrom': '#8B4513', 'Preta': '#000000', 'Cinza': '#808080', 'Amarela': '#FFFF00', 'Laranja': '#FFA500', 'Verde': '#008000'}
-                fig = px.pie(df_f, values='Qtd', names='Faixa', hole=0.4, color='Faixa', color_discrete_map=c_map)
-                fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=300)
+        # --- BLOCO INFERIOR: GRÁFICO DE DISTRIBUIÇÃO ---
+        st.subheader("📊 Distribuição de Alunos por Faixa")
+        dados_f = db.executar_query("""
+            SELECT faixa, COUNT(*) as qtd FROM usuarios 
+            WHERE id_filial=%s AND status_conta='Ativo' AND perfil='aluno' GROUP BY faixa
+        """, (id_filial,), fetch=True)
+        
+        if dados_f:
+            df_f = pd.DataFrame(dados_f, columns=['Faixa', 'Qtd'])
+            c_map = {
+                'Branca': '#FFFFFF', 'Cinza/Branca': '#E0E0E0', 'Cinza': '#808080', 'Cinza/Preta': '#4F4F4F',
+                'Amarela/Branca': '#FFFACD', 'Amarela': '#FFFF00', 'Amarela/Preta': '#BDB76B',
+                'Laranja/Branca': '#FFDAB9', 'Laranja': '#FFA500', 'Laranja/Preta': '#FF8C00',
+                'Verde/Branca': '#90EE90', 'Verde': '#008000', 'Verde/Preta': '#006400',
+                'Azul': '#0000FF', 'Roxa': '#8A2BE2', 'Marrom': '#8B4513', 'Preta': '#000000'
+            }
+            fig = px.pie(df_f, values='Qtd', names='Faixa', hole=0.4, color='Faixa', color_discrete_map=c_map)
+            fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=350)
+            
+            c_g1, c_g2, c_g3 = st.columns([1, 2, 1])
+            with c_g2:
                 st.plotly_chart(fig, use_container_width=True)
 
     # =======================================================
-    # 2. CHAMADA (VERSÃO FINAL: CONTADOR DE PRESENTES + TUDO AJUSTADO)
+    # 2. CHAMADA
     # =======================================================
     elif menu_selecionado == "✅ Chamada":
         st.title("✅ Controle de Presença")
 
-        # --- 1. SEÇÃO DE CHECK-INS (TOPO - 4 COLUNAS) ---
         sql_checkins = """
             SELECT c.id, u.id as id_aluno, u.nome_completo, u.faixa, t.nome as nome_turma
             FROM checkins c 
@@ -231,7 +252,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                 for idx, p in enumerate(pendencias):
                     with cols_p[idx % 4]:
                         with st.container(border=True):
-                            st.write(p['nome_completo'])
+                            st.write(p['nome_completo'].strip())
                             st.caption(f"{p['faixa']} | {p['nome_turma']}")
                             
                             b_c1, b_c2 = st.columns(2)
@@ -244,7 +265,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                                 st.rerun()
             st.divider()
 
-        # --- 2. FILTROS E CHAMADA MANUAL ---
         col_filtros, col_manual = st.columns([1, 2.5])
         
         with col_filtros:
@@ -274,7 +294,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                     novos_marcados = []
                     for idx, al in enumerate(alunos_turma):
                         is_p = al['id'] in ids_presentes
-                        if cols_al[idx % 2].checkbox(al['nome_completo'], value=is_p, key=f"f_man_{al['id']}"):
+                        if cols_al[idx % 2].checkbox(al['nome_completo'].strip(), value=is_p, key=f"f_man_{al['id']}"):
                             novos_marcados.append(al['id'])
                     
                     if st.form_submit_button("💾 Salvar Chamada Oficial", type="primary", use_container_width=True):
@@ -288,7 +308,6 @@ def painel_adm_filial(renderizar_sidebar=True):
             else:
                 st.info("👈 Selecione uma turma para realizar a chamada manual.")
 
-        # --- 3. RESUMO VISUAL (BADGES + CONTADOR TOTAL) ---
         if id_t_filtro:
             st.write("")
             st.divider()
@@ -300,7 +319,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                 WHERE p.data_presenca = %s AND u.id_turma = %s
             """, (data_aula, id_t_filtro), fetch=True)
             
-            # Cálculo do Total
             total_p = len(presentes_detalhes) if presentes_detalhes else 0
             
             st.markdown(f"#### 🥋 Alunos no Tatame - {data_br} (Total: {total_p})")
@@ -316,37 +334,91 @@ def painel_adm_filial(renderizar_sidebar=True):
                 html_badges = '<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-start;align-items:center;width:100%;">'
                 for p in presentes_detalhes:
                     bg, txt = cores_map.get(p['faixa'], ('#333333', '#FFFFFF'))
-                    html_badges += f'<div style="background-color:{bg};color:{txt};padding:5px 14px;border-radius:18px;border:1px solid #555;font-size:13px;font-weight:500;white-space:nowrap;margin-bottom:4px;">{p["nome_completo"]}</div>'
+                    html_badges += f'<div style="background-color:{bg};color:{txt};padding:5px 14px;border-radius:18px;border:1px solid #555;font-size:13px;font-weight:500;white-space:nowrap;margin-bottom:4px;">{p["nome_completo"].strip()}</div>'
                 html_badges += '</div>'
                 st.markdown(html_badges, unsafe_allow_html=True)
             else:
                 st.caption("Nenhum aluno confirmado nesta turma.")
 
     # =======================================================
-    # 4. GRADUAÇÕES (RADAR COM INTERFACE LIMPA E OTIMIZADA)
+    # 4. GRADUAÇÕES (FLUXO KANBAN COMPLETO)
     # =======================================================
     elif menu_selecionado == "🎓 Graduações":
         st.title("🎓 Gestão de Graduações")
         
-        # Busca solicitações de troca de cor de faixa pendentes
-        solicitacoes = db.executar_query("""
-            SELECT s.id, u.id as id_aluno, u.nome_completo, s.nova_faixa, s.status 
+        todas_solic = db.executar_query("""
+            SELECT s.id, u.id as id_aluno, u.nome_completo, s.faixa_atual, s.nova_faixa, s.status 
             FROM solicitacoes_graduacao s 
             JOIN usuarios u ON s.id_aluno=u.id 
-            WHERE s.id_filial=%s AND s.status != 'Concluido'
+            WHERE s.id_filial=%s AND s.status IN ('Pendente', 'Aceito', 'Realizado')
+            AND s.id IN (
+                SELECT MAX(id) FROM solicitacoes_graduacao 
+                WHERE status IN ('Pendente', 'Aceito', 'Realizado') 
+                GROUP BY id_aluno
+            )
         """, (id_filial,), fetch=True)
         
-        if solicitacoes:
-            with st.expander("🟠 Solicitações de Exame Pendentes", expanded=True):
-                for s in solicitacoes:
-                    c1, c2 = st.columns([3, 1])
-                    c1.write(f"**{s['nome_completo']}** ➝ Próxima cor: **{s['nova_faixa']}**")
-                    if c2.button("Aprovar Exame", key=f"ap_ex_{s['id']}"):
-                        db.registrar_nova_faixa(s['id_aluno'], s['nova_faixa'])
-                        db.executar_query("UPDATE solicitacoes_graduacao SET status='Concluido' WHERE id=%s", (s['id'],))
-                        st.success("Graduação homologada!")
-                        time.sleep(0.5)
-                        st.rerun()
+        mapa_status_solic = {s['id_aluno']: s['status'] for s in todas_solic} if todas_solic else {}
+        
+        col_fase2, col_fase3 = st.columns(2)
+        
+        # FASE 2: Aceite da Gestão (Somente Admins)
+        if eh_admin:
+            pendentes = [s for s in todas_solic if s['status'] == 'Pendente']
+            with col_fase2:
+                with st.expander(f"🟡 Novas Indicações ({len(pendentes)})", expanded=True):
+                    if pendentes:
+                        for p in pendentes:
+                            with st.container(border=True):
+                                st.write(f"**{p['nome_completo'].strip()}**")
+                                faixa_at = p.get('faixa_atual') or 'Indefinida'
+                                st.caption(f"Atual: {faixa_at}")
+                                
+                                # NOVO: Botões Lado a Lado (Aceitar / Recusar)
+                                c_btn_acc, c_btn_rec = st.columns(2)
+                                if c_btn_acc.button("✅ Aceitar", key=f"aceit_{p['id']}", type="primary", use_container_width=True):
+                                    db.executar_query("UPDATE solicitacoes_graduacao SET status='Aceito' WHERE id=%s", (p['id'],))
+                                    st.success("Liberado para exame!")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                if c_btn_rec.button("❌ Recusar", key=f"recusa_{p['id']}", use_container_width=True):
+                                    db.executar_query("DELETE FROM solicitacoes_graduacao WHERE id=%s", (p['id'],))
+                                    st.warning("Indicação removida!")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                    else:
+                        st.caption("Nenhuma indicação pendente.")
+        
+        # FASE 3: Lançar Resultados
+        aceitos = [s for s in todas_solic if s['status'] == 'Aceito']
+        with col_fase3 if eh_admin else st.container():
+            with st.expander(f"🔵 Exames Agendados ({len(aceitos)})", expanded=True):
+                if aceitos:
+                    lista_cores = ["Cinza/Branca", "Cinza", "Cinza/Preta", "Amarela/Branca", "Amarela", "Amarela/Preta", 
+                                   "Laranja/Branca", "Laranja", "Laranja/Preta", "Verde/Branca", "Verde", "Verde/Preta", 
+                                   "Azul", "Roxa", "Marrom", "Preta"]
+                    for a in aceitos:
+                        with st.container(border=True):
+                            st.write(f"**{a['nome_completo'].strip()}**")
+                            faixa_at_a = a.get('faixa_atual') or 'Indefinida'
+                            st.caption(f"De: {faixa_at_a}")
+                            with st.form(key=f"form_result_{a['id']}"):
+                                nova_cor = st.selectbox("Faixa Conquistada:", lista_cores)
+                                
+                                # NOVO: Botões Lado a Lado no Form (Lançar / Cancelar)
+                                col_b1, col_b2 = st.columns(2)
+                                if col_b1.form_submit_button("Lançar Resultado", type="primary", use_container_width=True):
+                                    db.executar_query("UPDATE solicitacoes_graduacao SET nova_faixa=%s, status='Realizado' WHERE id=%s", (nova_cor, a['id']))
+                                    st.success("Resultado enviado para homologação final!")
+                                    time.sleep(1)
+                                    st.rerun()
+                                if col_b2.form_submit_button("❌ Cancelar", use_container_width=True):
+                                    db.executar_query("DELETE FROM solicitacoes_graduacao WHERE id=%s", (a['id'],))
+                                    st.warning("Exame cancelado e removido do painel!")
+                                    time.sleep(1)
+                                    st.rerun()
+                else:
+                    st.caption("Nenhum exame agendado.")
         
         st.divider()
 
@@ -354,7 +426,6 @@ def painel_adm_filial(renderizar_sidebar=True):
         c_r1, c_r2 = st.columns(2)
         cat_radar = c_r1.radio("Público:", ["Adultos (16+)", "Kids (<16)"], horizontal=True)
         
-        # Filtro de idade baseado na categoria selecionada
         filtro_idade = ">= 16" if "Adultos" in cat_radar else "< 16"
         
         alunos_radar = db.executar_query(f"""
@@ -368,7 +439,6 @@ def painel_adm_filial(renderizar_sidebar=True):
         """, (id_filial,), fetch=True)
 
         if alunos_radar:
-            # --- OTIMIZAÇÃO: BUSCA EM LOTE ---
             res_lote = db.executar_query("""
                 SELECT p.id_aluno, COUNT(p.id) as total 
                 FROM presencas p
@@ -382,38 +452,46 @@ def painel_adm_filial(renderizar_sidebar=True):
             cols_rad = st.columns(4)
             for i, a in enumerate(alunos_radar):
                 total_p = mapa_presencas.get(a['id'], 0)
-                
-                # Chamada do novo motor que retorna 3 parâmetros exatos
                 apto, msg, troca = utils.calcular_status_graduacao(a, total_p)
                 
                 with cols_rad[i % 4]:
                     with st.container(border=True):
-                        st.markdown(f"**{a['nome_completo']}**")
+                        st.markdown(f"**{a['nome_completo'].strip()}**")
                         st.caption(f"{a['faixa']} ({a['graus']}º G)")
                         
-                        # Identidade visual limpa e direta
-                        cor_texto = 'green' if apto else 'orange'
-                        icone = "🔥" if (apto and troca) else ("🎓" if apto else "⏳")
-                        st.markdown(f"**Status:** :{cor_texto}[{icone} {msg}]")
-                        
-                        # Apenas exibe o botão se estiver realmente Apto! A interface fica limpa.
-                        if apto:
-                            if troca:
-                                if st.button("Indicar Faixa", key=f"sol_{a['id']}", use_container_width=True, type="primary"):
-                                    db.executar_query("""
-                                        INSERT INTO solicitacoes_graduacao (id_aluno, id_filial, nova_faixa, status)
-                                        VALUES (%s, %s, 'Próxima Faixa', 'Pendente')
-                                    """, (a['id'], id_filial))
-                                    st.success("Solicitação enviada!")
-                                    time.sleep(1)
-                                    st.rerun()
-                            else:
-                                if st.button("Conceder Grau", key=f"g_adm_{a['id']}", use_container_width=True, type="primary"):
-                                    db.registrar_grau_direto(a['id'])
-                                    st.balloons()
-                                    st.success(f"Grau concedido a {a['nome_completo'].split()[0]}!")
-                                    time.sleep(1)
-                                    st.rerun()
+                        if a['id'] in mapa_status_solic:
+                            status_atual = mapa_status_solic[a['id']]
+                            if status_atual == 'Pendente':
+                                st.markdown("**Status:** :orange[⏳ Aguardando Gestão]")
+                                st.button("Indicação Enviada", key=f"sol_ok_{a['id']}", disabled=True, use_container_width=True)
+                            elif status_atual == 'Aceito':
+                                st.markdown("**Status:** :blue[📋 Confirmado(a) no Exame]")
+                                st.button("Aguardando Teste", key=f"sol_ok_{a['id']}", disabled=True, use_container_width=True)
+                            elif status_atual == 'Realizado':
+                                st.markdown("**Status:** :green[✅ Aguardando Diploma]")
+                                st.button("Aprovado!", key=f"sol_ok_{a['id']}", disabled=True, use_container_width=True)
+                        else:
+                            cor_texto = 'green' if apto else 'orange'
+                            icone = "🔥" if (apto and troca) else ("🎓" if apto else "⏳")
+                            st.markdown(f"**Status:** :{cor_texto}[{icone} {msg}]")
+                            
+                            if apto:
+                                if troca:
+                                    if st.button("Indicar Faixa", key=f"sol_{a['id']}", use_container_width=True, type="primary"):
+                                        db.executar_query("""
+                                            INSERT INTO solicitacoes_graduacao (id_aluno, id_filial, faixa_atual, nova_faixa, status)
+                                            VALUES (%s, %s, %s, 'A Definir', 'Pendente')
+                                        """, (a['id'], id_filial, a['faixa']))
+                                        st.success("Indicação enviada!")
+                                        time.sleep(1)
+                                        st.rerun()
+                                else:
+                                    if st.button("Conceder Grau", key=f"g_adm_{a['id']}", use_container_width=True, type="primary"):
+                                        db.registrar_grau_direto(a['id'])
+                                        st.balloons()
+                                        st.success(f"Grau concedido!")
+                                        time.sleep(1)
+                                        st.rerun()
         else:
             st.info("Nenhum aluno nesta categoria no momento.")
 
@@ -425,12 +503,10 @@ def painel_adm_filial(renderizar_sidebar=True):
         
         tab_config, tab_elenco = st.tabs(["⚙️ Criar/Editar Turmas", "👥 Alunos na Turma"])
         
-        # --- ABA 1: CONFIGURAÇÃO DE TURMAS ---
         with tab_config:
             if 'edit_turma_id' not in st.session_state: 
                 st.session_state.edit_turma_id = None
 
-            # Variáveis para Edição
             v_n, v_d, v_h, v_p, v_m = "", "", "", None, None
             lbl_b = "➕ Criar Nova Turma"
             expandido = False
@@ -449,13 +525,11 @@ def painel_adm_filial(renderizar_sidebar=True):
                     hora_t = c3.text_input("Horário", value=v_h, placeholder="Ex: 19:30")
                     
                     cp, cm = st.columns(2)
-                    # Busca Profs/Lideres
                     profs = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_filial=%s AND perfil IN ('professor', 'lider', 'adm_filial') AND status_conta='Ativo'", (id_filial,), fetch=True)
                     opt_p = {p['nome_completo']: p['id'] for p in profs} if profs else {}
                     idx_p = list(opt_p.values()).index(v_p) if v_p in opt_p.values() else 0
                     sel_p = cp.selectbox("Professor Responsável", list(opt_p.keys()), index=idx_p) if opt_p else None
                     
-                    # Busca Monitores
                     mons = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_filial=%s AND perfil='monitor' AND status_conta='Ativo'", (id_filial,), fetch=True)
                     opt_m = {"--- Sem Monitor ---": None}
                     if mons: opt_m.update({m['nome_completo']: m['id'] for m in mons})
@@ -486,7 +560,6 @@ def painel_adm_filial(renderizar_sidebar=True):
             st.write("")
             st.markdown("##### 📍 Turmas Ativas")
             
-            # Listagem das Turmas em Cards (2 Colunas)
             q_ts = """
                 SELECT t.id, t.nome, t.dias, t.horario, u1.nome_completo as prof, u2.nome_completo as mon,
                 (SELECT COUNT(*) FROM usuarios WHERE id_turma = t.id AND status_conta = 'Ativo') as total
@@ -514,7 +587,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                                 db.executar_query("DELETE FROM turmas WHERE id=%s", (t['id'],)); st.rerun()
             else: st.info("Nenhuma turma cadastrada.")
 
-        # --- ABA 2: GESTÃO DE ELENCO (ENTURMAR ALUNOS) ---
         with tab_elenco:
             st.markdown("##### 👥 Organizar Alunos")
             t_gestao = db.executar_query("SELECT id, nome, horario FROM turmas WHERE id_filial=%s ORDER BY horario", (id_filial,), fetch=True)
@@ -531,7 +603,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                     al_dentro = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_turma=%s AND status_conta='Ativo' ORDER BY nome_completo", (id_t_alvo,), fetch=True)
                     if al_dentro:
                         for a in al_dentro:
-                            if st.button(f"❌ {a['nome_completo']}", key=f"rem_al_{a['id']}", use_container_width=True, help="Remover da turma"):
+                            if st.button(f"❌ {a['nome_completo'].strip()}", key=f"rem_al_{a['id']}", use_container_width=True, help="Remover da turma"):
                                 db.executar_query("UPDATE usuarios SET id_turma=NULL WHERE id=%s", (a['id'],)); st.rerun()
                     else: st.caption("Turma vazia.")
 
@@ -540,7 +612,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                     al_fora = db.executar_query("SELECT id, nome_completo FROM usuarios WHERE id_turma IS NULL AND id_filial=%s AND status_conta='Ativo' AND perfil IN ('aluno', 'monitor') ORDER BY nome_completo", (id_filial,), fetch=True)
                     if al_fora:
                         for a in al_fora:
-                            if st.button(f"➕ {a['nome_completo']}", key=f"add_al_{a['id']}", use_container_width=True, help="Adicionar à turma"):
+                            if st.button(f"➕ {a['nome_completo'].strip()}", key=f"add_al_{a['id']}", use_container_width=True, help="Adicionar à turma"):
                                 db.executar_query("UPDATE usuarios SET id_turma=%s WHERE id=%s", (id_t_alvo, a['id'])); st.rerun()
                     else: st.caption("Não há alunos sem turma.")
 
@@ -550,7 +622,6 @@ def painel_adm_filial(renderizar_sidebar=True):
     elif menu_selecionado == "👥 Alunos":
         st.title("👥 Gestão de Alunos")
 
-        # --- 1. BARRA DE FERRAMENTAS (BUSCA E FILTROS) ---
         with st.container(border=True):
             c_busca, c_turma, c_status = st.columns([2, 1, 1])
             busca_nome = c_busca.text_input("🔍 Buscar por nome...", placeholder="Digite o nome do aluno")
@@ -561,7 +632,6 @@ def painel_adm_filial(renderizar_sidebar=True):
             sel_tf = c_turma.selectbox("📍 Filtrar Turma", ["Todas"] + list(d_tf.keys()))
             filtro_status = c_status.selectbox("📌 Status", ["Ativo", "Inativo", "Todos"], index=0)
 
-        # --- 2. LÓGICA DE EDIÇÃO DE CADASTRO ---
         if st.session_state.get('aluno_edit_id'):
             id_ed = st.session_state['aluno_edit_id']
             dados_al = db.executar_query("SELECT * FROM usuarios WHERE id=%s", (id_ed,), fetch=True)
@@ -569,10 +639,10 @@ def painel_adm_filial(renderizar_sidebar=True):
             if dados_al:
                 al_dados = dados_al[0]
                 with st.container(border=True):
-                    st.subheader(f"📝 Editando Perfil: {al_dados['nome_completo']}")
+                    st.subheader(f"📝 Editando Perfil: {al_dados['nome_completo'].strip()}")
                     with st.form("form_edicao_aluno_completo"):
                         c1, c2, c3 = st.columns([2, 1, 1])
-                        novo_nome = c1.text_input("Nome Completo", value=al_dados['nome_completo'])
+                        novo_nome = c1.text_input("Nome Completo", value=al_dados['nome_completo'].strip())
                         novo_email = c2.text_input("E-mail (Login)", value=al_dados['email'])
                         novo_tel = c3.text_input("Telefone", value=al_dados['telefone'])
                         
@@ -608,12 +678,11 @@ def painel_adm_filial(renderizar_sidebar=True):
                             st.rerun()
                 st.divider()
 
-        # --- 3. PROMOÇÃO DE CARGO ---
         if st.session_state.get('promover_cargo_id'):
             id_p = st.session_state['promover_cargo_id']
             al_p = db.executar_query("SELECT nome_completo, perfil FROM usuarios WHERE id=%s", (id_p,), fetch=True)[0]
             with st.container(border=True):
-                st.warning(f"Alterar cargo de {al_p['nome_completo']}?")
+                st.warning(f"Alterar cargo de {al_p['nome_completo'].strip()}?")
                 n_perfil = st.selectbox("Novo Perfil:", ["aluno", "monitor", "professor"], index=0)
                 cp1, cp2 = st.columns(2)
                 if cp1.button("Confirmar Promoção", type="primary", use_container_width=True):
@@ -626,7 +695,6 @@ def painel_adm_filial(renderizar_sidebar=True):
                     st.rerun()
             st.divider()
 
-        # --- 4. CONSULTA DOS ALUNOS ---
         sql_alunos = """
             SELECT u.*, t.nome as nome_turma, t.horario as horario_turma
             FROM usuarios u
@@ -658,7 +726,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                         c_h, c_b = st.columns([1.8, 1.2])
                         cor_st = "green" if al['status_conta'] == 'Ativo' else "red"
                         cargo = f" | {al['perfil'].upper()}" if al['perfil'] != 'aluno' else ""
-                        c_h.markdown(f"{al['nome_completo']}{cargo} <span style='color:{cor_st}; font-size:10px;'>● {al['status_conta']}</span>", unsafe_allow_html=True)
+                        c_h.markdown(f"{al['nome_completo'].strip()}{cargo} <span style='color:{cor_st}; font-size:10px;'>● {al['status_conta']}</span>", unsafe_allow_html=True)
                         
                         with c_b:
                             bz, be, bu, bs = st.columns(4)
@@ -745,7 +813,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                     with st.container(border=True):
                         label, cor = medalhas_p[i]
                         st.markdown(f"<h4 style='text-align:center; color:{cor}; margin:0;'>{label}</h4>", unsafe_allow_html=True)
-                        st.markdown(f"<p style='text-align:center; font-weight:bold; margin:0;'>{rank_mes[i]['nome_completo']}</p>", unsafe_allow_html=True)
+                        st.markdown(f"<p style='text-align:center; font-weight:bold; margin:0;'>{rank_mes[i]['nome_completo'].strip()}</p>", unsafe_allow_html=True)
                         st.markdown(f"**{rank_mes[i]['treinos']} treinos**", help="Total do mês")
             
             if len(rank_mes) > 3:
@@ -775,7 +843,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                 for rc in rank_comp:
                     with st.container(border=True):
                         c_n, c_p = st.columns([3, 1])
-                        c_n.write(f"🏆 {rc['nome_completo']}")
+                        c_n.write(f"🏆 {rc['nome_completo'].strip()}")
                         c_p.markdown(f"**{rc['total']} pts**")
             else:
                 st.info("Sem medalhas aprovadas este ano.")
@@ -791,7 +859,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                 st.warning(f"🔔 {len(med_pend)} Medalhas para Aprovar")
                 for mp in med_pend:
                     with st.container(border=True):
-                        st.write(f"{mp['nome_completo']} - {mp['medalha']}")
+                        st.write(f"{mp['nome_completo'].strip()} - {mp['medalha']}")
                         st.caption(f"Torneio: {mp['nome_campeonato']}")
                         b1, b2 = st.columns(2)
                         if b1.button("✅ Sim", key=f"acc_{mp['id']}"):
@@ -811,7 +879,7 @@ def painel_adm_filial(renderizar_sidebar=True):
                     ORDER BY u.nome_completo
                 """
                 alunos_f = db.executar_query(sql_lista_alunos, (id_filial,), fetch=True)
-                opts_al = {al['nome_completo']: al['id'] for al in alunos_f} if alunos_f else {}
+                opts_al = {al['nome_completo'].strip(): al['id'] for al in alunos_f} if alunos_f else {}
                 
                 with st.form("form_medalha_adm", clear_on_submit=True):
                     al_sel = st.selectbox("Atleta", list(opts_al.keys())) if opts_al else None
